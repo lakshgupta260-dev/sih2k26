@@ -1,0 +1,8 @@
+Task ID,Task Name,WBS,Level,Discipline,Start,Finish,Quantity,UOM,Predecessors
+A1000,Project Start,1,1,OTHER,2026-10-01,2026-10-01,,,
+A1010,Site Clearance,1.1,2,CIVIL,2026-10-02,2026-10-05,100,sqm,A1000
+A1020,Excavation,1.2,2,CIVIL,2026-10-06,2026-10-10,500,cum,A1010
+A1030,Foundation Concrete,1.3,2,CIVIL,2026-10-11,2026-10-15,50,cum,A1020
+A1040,Structural Steel,1.4,2,STRUCTURAL,2026-10-16,2026-10-25,20,tonnes,A1030
+A1050,Piping Installation,1.5,2,PIPING,2026-10-26,2026-11-10,1000,inch-dia,A1040
+A1060,Project Finish,1.6,2,OTHER,2026-11-10,2026-11-10,,,A1050

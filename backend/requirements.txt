@@ -28,6 +28,8 @@ pytest-cov==6.0.0
 
 # --- Added in later phases --------------------------------------------------
 # Phase 3 : pandas, openpyxl
+pandas==2.2.3
+openpyxl==3.1.5
 # Phase 4 : pymupdf, pdfplumber, celery, redis, python-multipart
 # Phase 5 : rapidfuzz, sentence-transformers
 # Phase 7 : scikit-learn, joblib

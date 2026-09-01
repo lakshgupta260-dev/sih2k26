@@ -8,6 +8,7 @@ from app.db.base import Base
 from app.models.audit import AuditLog
 from app.models.project import Project, ProjectMembership
 from app.models.user import RefreshToken, User
+from app.models.schedule import Schedule, Activity, ActivityDependency
 
 __all__ = [
     "Base",
@@ -16,4 +17,7 @@ __all__ = [
     "ProjectMembership",
     "RefreshToken",
     "User",
+    "Schedule",
+    "Activity",
+    "ActivityDependency",
 ]

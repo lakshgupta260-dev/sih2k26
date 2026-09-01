@@ -6,12 +6,12 @@ Status of the SIH26122 backend against the eleven-phase plan.
 
 ## 1. Where things stand
 
-**2 of 11 phases complete.** Both validated against a live PostgreSQL 16
+**3 of 11 phases complete.** Both validated against a live PostgreSQL 16
 instance rather than assumed working.
 
 | Metric | Value |
 |---|---|
-| Phases complete | **2 / 11** (18%) |
+| Phases complete | **3 / 11** (27%) |
 | Application files | 49 Python files, 3,354 lines |
 | Test files | 5 files, 1,228 lines, **81 passing tests** |
 | Database tables | 5 (+ `alembic_version`) |
@@ -25,7 +25,7 @@ instance rather than assumed working.
 |---|---|---|---|
 | 1 | Scaffolding, config, database, Alembic, Docker | **Complete** | Live PG16 + Docker |
 | 2 | Auth, RBAC, users, projects | **Complete** | Live PG16, 81 tests |
-| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | Not started | — |
+| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | **Complete** | Live PG16 + Docker |
 | 4 | Report upload, document processing, processing jobs | Not started | — |
 | 5 | AI extraction, matching, confidence, human review | Not started | — |
 | 6 | Progress engine, planned-vs-actual analytics, dashboard | Not started | — |
