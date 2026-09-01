@@ -19,8 +19,11 @@ The frontend and any shared assets will be added alongside `backend/`.
 
 ## Getting started
 
-**New here? Start with the [Phase 1 Start Guide](docs/PHASE-1-START-GUIDE.md)** — prerequisites, a
-Docker and a native path, how to verify it works, and troubleshooting.
+**New here? Start with the [Start Guide](docs/START-GUIDE.md)** — prerequisites, a
+Docker and a native path, creating the first administrator, how to verify it
+works, the API reference and troubleshooting. ([PDF](docs/SIH26122-Start-Guide.pdf))
+
+Current status and remaining scope: [Progress Sheet](docs/PROGRESS.md) ([PDF](docs/SIH26122-Progress-Sheet.pdf)).
 
 For architecture and design decisions see [`backend/README.md`](backend/README.md).
 
