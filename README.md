@@ -19,8 +19,10 @@ The frontend and any shared assets will be added alongside `backend/`.
 
 ## Getting started
 
-See [`backend/README.md`](backend/README.md) for setup, run and test
-instructions.
+**New here? Start with the [Phase 1 Start Guide](docs/PHASE-1-START-GUIDE.md)** — prerequisites, a
+Docker and a native path, how to verify it works, and troubleshooting.
+
+For architecture and design decisions see [`backend/README.md`](backend/README.md).
 
 ## Build status
 
