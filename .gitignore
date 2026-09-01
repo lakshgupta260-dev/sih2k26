@@ -48,3 +48,14 @@ frontend/build/
 # Temporary files
 tmp/
 temp/
+# Keep runtime dirs in the tree, ignore their contents
+!backend/uploads/.gitkeep
+!backend/generated_reports/.gitkeep
+!backend/alembic/versions/.gitkeep
+
+# Local validation artefacts
+.pgdata/
+
+# macOS
+.DS_Store
+.keep_tmp
