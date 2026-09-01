@@ -8,7 +8,7 @@ progress. Built as a modular monolith.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Scaffolding, config, DB, Alembic, Docker | **Done, validated** |
-| 2 | Auth, RBAC, users, projects | Not started |
+| 2 | Auth, RBAC, users, projects | **Done, validated** |
 | 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | Not started |
 | 4 | Report upload, document processing, processing jobs | Not started |
 | 5 | AI extraction, matching, confidence, human review | Not started |
@@ -18,6 +18,29 @@ progress. Built as a modular monolith.
 | 9 | Meta / WhatsApp | Not started |
 | 10 | Vapi, AI project assistant | Not started |
 | 11 | Testing, hardening, performance, docs | Not started |
+
+## Bootstrapping the first administrator
+
+Self-registration only ever creates a `SITE_SUPERVISOR`, and creating a user
+with a higher role requires an existing administrator. Something outside the
+HTTP API therefore has to create the first one:
+
+```bash
+# native
+python -m app.cli create-admin --email you@yourdomain.com
+# docker
+docker compose exec api python -m app.cli create-admin --email you@yourdomain.com
+
+python -m app.cli list-admins
+```
+
+Omit `--password` to be prompted rather than putting it in your shell history.
+Re-running against an existing address promotes that user and resets their
+password, so it doubles as account recovery.
+
+> Note: the email must be a genuinely valid address. Reserved TLDs such as
+> `.local` and `.test` are rejected — by the CLI as well as the API, so the CLI
+> cannot mint an account the API would refuse to authenticate.
 
 ## Quick start (native)
 
@@ -120,12 +143,97 @@ survive a restart, which is intentional).
 `CORS_ORIGINS` and `ALLOWED_UPLOAD_EXTENSIONS` accept either a comma-separated
 string or a JSON array.
 
-## Endpoints (Phase 1)
+## Endpoints
 
-| Method | Path | Purpose |
+### Health
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/health` | public | Liveness. Always 200 while the process is up. |
+| GET | `/api/v1/health/ready` | public | Readiness. 200 when the DB is reachable, 503 otherwise. |
+
+### Auth
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/auth/register` | public | Self-register. Always yields SITE_SUPERVISOR. |
+| POST | `/api/v1/auth/login` | public | JSON login → access + refresh tokens. |
+| POST | `/api/v1/auth/token` | public | Form login, so Swagger's **Authorize** works. |
+| POST | `/api/v1/auth/refresh` | public | Rotate the refresh token, get a new pair. |
+| POST | `/api/v1/auth/logout` | any | Revoke one session, or all when no token is sent. |
+| GET | `/api/v1/auth/me` | any | The authenticated user. |
+| POST | `/api/v1/auth/change-password` | any | Change password; revokes all other sessions. |
+
+### Users
+| Method | Path | Access |
 |---|---|---|
-| GET | `/api/v1/health` | Liveness. Always 200 while the process is up. |
-| GET | `/api/v1/health/ready` | Readiness. 200 when the DB is reachable, 503 otherwise. |
+| GET | `/api/v1/users` | ADMIN |
+| POST | `/api/v1/users` | ADMIN (may set role) |
+| GET | `/api/v1/users/{id}` | self or ADMIN |
+| PATCH | `/api/v1/users/{id}` | self or ADMIN (profile only) |
+| PATCH | `/api/v1/users/{id}/role` | ADMIN |
+| PATCH | `/api/v1/users/{id}/status` | ADMIN |
+
+### Projects
+| Method | Path | Access |
+|---|---|---|
+| GET | `/api/v1/projects` | any (scoped to your memberships) |
+| POST | `/api/v1/projects` | ADMIN or PROJECT_MANAGER |
+| GET | `/api/v1/projects/{id}` | project member or ADMIN |
+| PATCH | `/api/v1/projects/{id}` | project manager or ADMIN |
+| DELETE | `/api/v1/projects/{id}` | project manager or ADMIN (soft delete) |
+| GET | `/api/v1/projects/{id}/members` | project member or ADMIN |
+| POST | `/api/v1/projects/{id}/members` | project manager or ADMIN |
+| PATCH | `/api/v1/projects/{id}/members/{user_id}` | project manager or ADMIN |
+| DELETE | `/api/v1/projects/{id}/members/{user_id}` | project manager or ADMIN |
 
 Every response carries `X-Request-ID`; supply your own to trace a call through
 the logs.
+
+## Authorization model
+
+Two independent layers:
+
+**System role** (`users.role`) — one of `ADMIN`, `PROJECT_MANAGER`,
+`SITE_SUPERVISOR`. Gates platform-wide capabilities such as listing users or
+creating a project at all.
+
+**Project role** (`project_memberships.role`) — the caller's role *on one
+project*. A user who is `SITE_SUPERVISOR` system-wide can be the
+`PROJECT_MANAGER` of a specific project, and a `PROJECT_MANAGER` system-wide
+has no access to a project they are not a member of.
+
+Rules worth knowing:
+
+* Project access is resolved from membership, not from the system role. `ADMIN`
+  is the one deliberate bypass and is treated as project manager everywhere.
+* A non-member gets **404, not 403**. Confirming that a project id exists is
+  itself a leak across the tenancy boundary.
+* Creating a project enrols the creator as its project manager, otherwise they
+  would immediately lose sight of it.
+* A project must always retain at least one project manager; the last one
+  cannot be demoted or removed.
+* The last active administrator cannot be demoted, and no administrator can
+  demote or deactivate themselves.
+* Changing a role or deactivating an account revokes that user's refresh
+  tokens, so the change applies immediately rather than at token expiry.
+
+## Tokens
+
+Access tokens are short-lived (default 30 min) and carry `role` and `email`
+claims. Refresh tokens are long-lived (default 7 days), single-purpose, and
+recorded server-side by `jti` so they can genuinely be revoked — a stateless
+JWT alone cannot be logged out.
+
+Refresh is **rotating**: presenting a refresh token revokes it and issues a new
+one. Replaying an already-revoked token is treated as evidence of theft and
+revokes every session for that user.
+
+The `type` claim (`access` / `refresh`) is enforced on decode, so a refresh
+token cannot be replayed as an access token.
+
+## Audit trail
+
+`audit_logs` is append-only — the repository raises on update and delete.
+Audit writes join the caller's transaction deliberately: if an action rolls
+back, its audit row rolls back with it, so the log can never claim something
+happened that did not. Registration, login, logout, password change, role and
+status changes, and all project and membership mutations are recorded.

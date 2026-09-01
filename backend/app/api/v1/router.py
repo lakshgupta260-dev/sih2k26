@@ -7,13 +7,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import health
+from app.api.v1 import auth, health, projects, users
 
 api_router = APIRouter()
 
 api_router.include_router(health.router)
+api_router.include_router(auth.router)
+api_router.include_router(users.router)
+api_router.include_router(projects.router)
 
 # Registered in later phases:
-#   auth, users, projects, schedules, activities, reports, documents,
-#   matching, progress, analytics, risks, ml, assistant, notifications,
-#   admin, integrations.meta, integrations.vapi
+#   schedules, activities, reports, documents, matching, progress, analytics,
+#   risks, ml, assistant, notifications, admin,
+#   integrations.meta, integrations.vapi

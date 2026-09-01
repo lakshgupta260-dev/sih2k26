@@ -26,6 +26,13 @@ For architecture and design decisions see [`backend/README.md`](backend/README.m
 
 ## Build status
 
-Phase 1 (scaffolding, configuration, database, Alembic, Docker) is complete and
-validated against a live PostgreSQL 16 instance. Phase 2 (authentication, RBAC,
-users, projects) is next. The full phase plan is in `backend/README.md`.
+Phases 1 and 2 are complete and validated against a live PostgreSQL 16
+instance, with 81 passing tests.
+
+* **Phase 1** — scaffolding, configuration, database, Alembic, Docker
+* **Phase 2** — authentication (access/refresh JWTs, bcrypt), RBAC across
+  `ADMIN` / `PROJECT_MANAGER` / `SITE_SUPERVISOR`, users, projects,
+  memberships, project-level authorization, audit logging
+
+Phase 3 (schedule upload, Excel/CSV parsing, L1–L6 activities, dependencies) is
+next. The full phase plan is in `backend/README.md`.
