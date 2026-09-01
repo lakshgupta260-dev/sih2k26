@@ -9,6 +9,7 @@ from app.models.audit import AuditLog
 from app.models.project import Project, ProjectMembership
 from app.models.user import RefreshToken, User
 from app.models.schedule import Schedule, Activity, ActivityDependency
+from app.models.document import ProcessingJob, ProgressReport, UploadedFile
 
 __all__ = [
     "Base",
@@ -20,4 +21,7 @@ __all__ = [
     "Schedule",
     "Activity",
     "ActivityDependency",
+    "UploadedFile",
+    "ProcessingJob",
+    "ProgressReport",
 ]

@@ -30,7 +30,11 @@ pytest-cov==6.0.0
 # Phase 3 : pandas, openpyxl
 pandas==2.2.3
 openpyxl==3.1.5
-# Phase 4 : pymupdf, pdfplumber, celery, redis, python-multipart
+# Phase 4 : document processing and background work
+PyMuPDF==1.25.1
+pdfplumber==0.11.5
+celery[redis]==5.4.0
+redis==5.2.1
 # Phase 5 : rapidfuzz, sentence-transformers
 # Phase 7 : scikit-learn, joblib
 # Phase 8 : reportlab / weasyprint

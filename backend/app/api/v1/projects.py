@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
 from app.api.deps import (
     AccessibleProject,
@@ -13,6 +13,7 @@ from app.api.deps import (
     ManagedProject,
     Pagination,
     RequireManager,
+    bearer_scheme,
 )
 from app.schemas.common import MessageResponse, Page
 from app.schemas.project import (
@@ -27,7 +28,14 @@ from app.schemas.project import (
 )
 from app.services.project import ProjectService
 
-router = APIRouter(prefix="/projects", tags=["projects"])
+# Project routes are authenticated. Declaring the bearer dependency here also
+# publishes the security requirement to OpenAPI, so Swagger UI attaches the
+# authorized token to manager-only routes such as project creation.
+router = APIRouter(
+    prefix="/projects",
+    tags=["projects"],
+    dependencies=[Depends(bearer_scheme)],
+)
 
 
 @router.get(
