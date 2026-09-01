@@ -59,16 +59,25 @@ class ScheduleParser:
                 
                 # Optionals
                 wbs_path = str(row[mapping.wbs_path]).strip() if mapping.wbs_path and mapping.wbs_path in df.columns and pd.notna(row[mapping.wbs_path]) else ""
-                level = int(row[mapping.level]) if mapping.level and mapping.level in df.columns and pd.notna(row[mapping.level]) else 1
+                try:
+                    level = int(float(row[mapping.level])) if mapping.level and mapping.level in df.columns and pd.notna(row[mapping.level]) else 1
+                except (ValueError, TypeError):
+                    level = 1
+
                 discipline = str(row[mapping.discipline]).strip() if mapping.discipline and mapping.discipline in df.columns and pd.notna(row[mapping.discipline]) else None
                 
                 start_val = row[mapping.planned_start] if mapping.planned_start and mapping.planned_start in df.columns else None
                 finish_val = row[mapping.planned_finish] if mapping.planned_finish and mapping.planned_finish in df.columns else None
                 
-                planned_start = pd.to_datetime(start_val).date() if pd.notna(start_val) else None
-                planned_finish = pd.to_datetime(finish_val).date() if pd.notna(finish_val) else None
+                start_dt = pd.to_datetime(start_val, errors="coerce") if pd.notna(start_val) else None
+                finish_dt = pd.to_datetime(finish_val, errors="coerce") if pd.notna(finish_val) else None
+                planned_start = start_dt.date() if (start_dt is not None and pd.notna(start_dt)) else None
+                planned_finish = finish_dt.date() if (finish_dt is not None and pd.notna(finish_dt)) else None
                 
-                budgeted_qty = float(row[mapping.budgeted_quantity]) if mapping.budgeted_quantity and mapping.budgeted_quantity in df.columns and pd.notna(row[mapping.budgeted_quantity]) else None
+                try:
+                    budgeted_qty = float(row[mapping.budgeted_quantity]) if mapping.budgeted_quantity and mapping.budgeted_quantity in df.columns and pd.notna(row[mapping.budgeted_quantity]) else None
+                except (ValueError, TypeError):
+                    budgeted_qty = None
                 uom = str(row[mapping.uom]).strip() if mapping.uom and mapping.uom in df.columns and pd.notna(row[mapping.uom]) else None
                 
                 # Create activity instances (no DB flush yet to optimize)

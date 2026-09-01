@@ -36,8 +36,11 @@ class PDFProcessor(DocumentProcessor):
             import pdfplumber
             with pdfplumber.open(path) as pdf: tables = sum(len(page.extract_tables()) for page in pdf.pages)
         except Exception: tables = 0
-        if not text.strip(): text = self.ocr.extract_text(path)
-        return ProcessorResult(text, {"page_count": pages, "table_count": tables, "ocr_used": bool(text.strip()), "ocr_provider": self.ocr.name})
+        ocr_used = False
+        if not text.strip():
+            text = self.ocr.extract_text(path)
+            ocr_used = bool(text.strip())
+        return ProcessorResult(text, {"page_count": pages, "table_count": tables, "ocr_used": ocr_used, "ocr_provider": self.ocr.name})
 class ExcelProcessor(DocumentProcessor):
     name = "excel"
     def process(self, path: Path) -> ProcessorResult:
