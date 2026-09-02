@@ -29,13 +29,33 @@ For architecture and design decisions see [`backend/README.md`](backend/README.m
 
 ## Build status
 
-Phases 1 and 2 are complete and validated against a live PostgreSQL 16
-instance, with 81 passing tests.
+*Last checked 2026-09-03 against the actual code in `backend/`; see
+[`docs/PROGRESS.md`](docs/PROGRESS.md) for the full breakdown and how each
+line below was verified.*
+
+Phases 1–7 are complete and were validated against a live PostgreSQL 16
+instance. Phase 8 is code-complete (reports and notifications) but has not
+yet had its test suite re-run against Postgres since this doc was last
+updated — see `backend/README.md` for exactly what that does and doesn't
+cover.
 
 * **Phase 1** — scaffolding, configuration, database, Alembic, Docker
 * **Phase 2** — authentication (access/refresh JWTs, bcrypt), RBAC across
   `ADMIN` / `PROJECT_MANAGER` / `SITE_SUPERVISOR`, users, projects,
   memberships, project-level authorization, audit logging
+* **Phase 3** — schedule upload, Excel/CSV/XER/MS Project parsing, L1–L6
+  activity hierarchy, dependencies
+* **Phase 4** — document upload, PDF/Excel/OCR-ready processing, Celery job
+  queue
+* **Phase 5** — AI extraction and activity matching (fuzzy + lexical +
+  discipline/hierarchy signals), human review queue
+* **Phase 6** — progress engine, planned-vs-actual analytics, dashboard
+  aggregation
+* **Phase 7** — ML delay prediction (rule-based baseline + Random Forest,
+  promoted only when it beats the baseline), risk scoring
+* **Phase 8** — PDF/Excel report generation, multi-channel notifications
+  (in-app is live; email/WhatsApp are dry-run stubs pending Phase 9)
 
-Phase 3 (schedule upload, Excel/CSV parsing, L1–L6 activities, dependencies) is
-next. The full phase plan is in `backend/README.md`.
+Not started: **Phase 9** (Meta/WhatsApp integration), **Phase 10** (Vapi
+voice assistant), **Phase 11** (hardening, seed data, production Docker
+overlay). The full phase plan is in `backend/README.md`.

@@ -52,4 +52,5 @@ celery[redis]==5.4.0
 redis==5.2.1
 # Phase 7 : delay prediction (scikit-learn is pinned above)
 joblib==1.4.2
-# Phase 8 : reportlab / weasyprint
+# Phase 8 : reportlab
+reportlab==4.2.5

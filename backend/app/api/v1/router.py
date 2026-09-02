@@ -12,8 +12,10 @@ from app.api.v1 import (
     analytics,
     auth,
     documents,
+    generated_reports,
     health,
     matching,
+    notifications,
     prediction,
     progress,
     projects,
@@ -33,11 +35,14 @@ api_router.include_router(activities.router)
 api_router.include_router(documents.router)
 api_router.include_router(documents.jobs_router)
 api_router.include_router(reports.router)
+api_router.include_router(generated_reports.router)
+api_router.include_router(notifications.router)
+api_router.include_router(notifications.project_notifications_router)
 api_router.include_router(matching.router)
 api_router.include_router(progress.router)
 api_router.include_router(analytics.router)
 api_router.include_router(prediction.router)
 
 # Registered in later phases:
-#   risks, assistant, notifications, admin,
+#   risks, assistant, admin,
 #   integrations.meta, integrations.vapi

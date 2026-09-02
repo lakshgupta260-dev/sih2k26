@@ -218,3 +218,19 @@ def auth_headers(client: TestClient):
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
     return _headers
+
+
+@pytest.fixture
+def test_project(client: TestClient, manager_user: User, auth_headers):
+    """Create a project under the manager user and return (project_id, headers)."""
+    headers = auth_headers(manager_user)
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "code": f"PROJ-{uuid.uuid4().hex[:6].upper()}",
+            "name": "Test Project",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"], headers

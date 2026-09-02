@@ -25,7 +25,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_uri)
+# % in URL-encoded passwords (e.g. %21 for !) must be escaped for configparser
+config.set_main_option("sqlalchemy.url", settings.sqlalchemy_database_uri.replace("%", "%%"))
 
 target_metadata = Base.metadata
 

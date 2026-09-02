@@ -13,6 +13,7 @@ from app.models.schedule import Schedule, Activity, ActivityDependency
 from app.models.document import ProcessingJob, ProgressReport, UploadedFile
 from app.models.progress import ActualProgress
 from app.models.prediction import DelayModelVersion, DelayPrediction
+from app.models.reporting import GeneratedReport, Notification
 
 __all__ = [
     "Base",
@@ -22,6 +23,8 @@ __all__ = [
     "DelayModelVersion",
     "DelayPrediction",
     "ExtractedActivity",
+    "GeneratedReport",
+    "Notification",
     "Project",
     "ProjectMembership",
     "RefreshToken",

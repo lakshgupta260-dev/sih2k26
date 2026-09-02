@@ -126,6 +126,30 @@ class NotificationChannel(StrEnum):
     IN_APP = "IN_APP"
     EMAIL = "EMAIL"
     WHATSAPP = "WHATSAPP"
+    VAPI = "VAPI"
+
+
+class NotificationStatus(StrEnum):
+    """Lifecycle of one channel-specific notification delivery."""
+
+    PENDING = "PENDING"
+    SENDING = "SENDING"
+    SENT = "SENT"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    READ = "READ"
+
+
+class GeneratedReportFormat(StrEnum):
+    PDF = "PDF"
+    XLSX = "XLSX"
+
+
+class GeneratedReportStatus(StrEnum):
+    PENDING = "PENDING"
+    GENERATING = "GENERATING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
 
 class AuditAction(StrEnum):

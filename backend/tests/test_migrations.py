@@ -74,8 +74,10 @@ def test_migrations_produce_the_model_schema() -> None:
     import sys
 
     url = make_url(settings.sqlalchemy_database_uri).set(database="sih_migration_check")
+    db_url = url.render_as_string(hide_password=False)
+    admin_url = url.set(database="postgres").render_as_string(hide_password=False)
     try:
-        admin = create_engine(str(url.set(database="postgres")), isolation_level="AUTOCOMMIT")
+        admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as conn:
             conn.execute(
                 text(
@@ -93,7 +95,7 @@ def test_migrations_produce_the_model_schema() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=BACKEND_ROOT,
-        env={**os.environ, "DATABASE_URL": str(url)},
+        env={**os.environ, "DATABASE_URL": db_url},
         capture_output=True,
         text=True,
     )
@@ -101,7 +103,7 @@ def test_migrations_produce_the_model_schema() -> None:
         f"'alembic upgrade head' failed:\n{result.stdout}\n{result.stderr}"
     )
 
-    engine = create_engine(str(url))
+    engine = create_engine(db_url)
     try:
         with engine.connect() as conn:
             diff = compare_metadata(MigrationContext.configure(conn), Base.metadata)
