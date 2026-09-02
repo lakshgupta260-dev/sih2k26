@@ -47,14 +47,14 @@ def _test_database_url() -> str:
     if explicit:
         return explicit
     url = make_url(settings.sqlalchemy_database_uri)
-    return str(url.set(database=f"{url.database}{TEST_DB_SUFFIX}"))
+    return url.set(database=f"{url.database}{TEST_DB_SUFFIX}").render_as_string(hide_password=False)
 
 
 def _ensure_database(url: str) -> None:
     """Create the test database if it does not exist."""
     target = make_url(url)
     admin_url = target.set(database="postgres")
-    admin = create_engine(str(admin_url), isolation_level="AUTOCOMMIT")
+    admin = create_engine(admin_url.render_as_string(hide_password=False), isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
         exists = conn.execute(
             text("SELECT 1 FROM pg_database WHERE datname = :name"),

@@ -11,9 +11,11 @@ from app.models.project import Project, ProjectMembership
 from app.models.user import RefreshToken, User
 from app.models.schedule import Schedule, Activity, ActivityDependency
 from app.models.document import ProcessingJob, ProgressReport, UploadedFile
+from app.models.progress import ActualProgress
 
 __all__ = [
     "Base",
+    "ActualProgress",
     "ActivityMatch",
     "AuditLog",
     "ExtractedActivity",

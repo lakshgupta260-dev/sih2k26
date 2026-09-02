@@ -9,10 +9,12 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     activities,
+    analytics,
     auth,
     documents,
     health,
     matching,
+    progress,
     projects,
     reports,
     schedules,
@@ -31,8 +33,9 @@ api_router.include_router(documents.router)
 api_router.include_router(documents.jobs_router)
 api_router.include_router(reports.router)
 api_router.include_router(matching.router)
+api_router.include_router(progress.router)
+api_router.include_router(analytics.router)
 
 # Registered in later phases:
-#   progress, analytics,
 #   risks, ml, assistant, notifications, admin,
 #   integrations.meta, integrations.vapi
