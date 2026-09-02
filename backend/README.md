@@ -12,7 +12,7 @@ progress. Built as a modular monolith.
 | 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | **Done** |
 | 4 | Report upload, document processing, processing jobs | **Done** |
 | 5 | AI extraction, matching, confidence, human review | **Done, validated** |
-| 6 | Progress engine, planned-vs-actual analytics | Not started |
+| 6 | Progress engine, planned-vs-actual analytics | **Done, validated** |
 | 7 | ML delay prediction, risk, explainability | Not started |
 | 8 | Report generation, notifications | Not started |
 | 9 | Meta / WhatsApp | Not started |
@@ -252,6 +252,74 @@ threshold: indistinguishable options are a human's decision, not a guess.
 
 Review decisions preserve the machine's original verdict in `auto_status`, so
 the matcher can be scored against human judgement later.
+
+## Progress and analytics (Phase 6)
+
+Where confirmed matches become a measured position against the plan.
+
+### Booking progress
+
+One record per activity per reporting date. Re-posting a date **corrects** that
+day's figure rather than appending a second contradictory one; the superseded
+values are kept in the audit entry, so a correction is still traceable.
+
+`POST /progress/apply-matches` closes the
+document → extract → match → progress chain. It is deliberately narrow:
+
+| Input | Treatment |
+|---|---|
+| `AUTO_MATCHED`, `MANUALLY_CONFIRMED` | Booked against the plan activity. |
+| `NEEDS_REVIEW`, `UNMATCHED`, rejected | Left alone. |
+| `PLANNED_NOT_ACTUAL`, `NONE` | **Never booked**, even if a reviewer confirmed the link by hand. |
+| Event with no determinable date | Skipped, not dated to today. |
+
+Every refusal is counted and named in the response, so "why didn't my report
+show up" has an answer instead of a shrug.
+
+### Weighting
+
+Completion rolls up from the leaves weighted by `budgeted_quantity`, so 40 km
+of lowering does not count the same as one survey task. Where the plan states
+no budget the weight falls back to 1.0, degrading to a plain activity count
+rather than dropping the activity out of the denominator. A reported quantity
+of **zero is a measurement**, not a blank — it does not fall through to the
+percentage field.
+
+The traversal is a single iterative post-order pass, so a 5,000-activity WBS
+costs one walk rather than one subtree walk per activity, and a corrupt
+`parent_id` cycle degrades to leaf reporting instead of hanging the request.
+
+### What the analytics refuse to invent
+
+| Field | Null means |
+|---|---|
+| `schedule_variance` | The ingested plan carries no dates, so there is nothing to be ahead or behind of. Not `0.0`. |
+| `planned_completion_percentage` | Same. |
+| `SCurvePoint.actual_percentage` | Nothing was measured at that sample. Carrying the last value forward would draw a flat line that reads as an observed stall. |
+| `/s-curve` returning `[]` | No planned window anywhere; there is no curve to draw. |
+
+Planned effort is spread **linearly** inside each activity's planned window.
+A real plan may front- or back-load, but start and finish are the only
+distribution the ingested schedule states — assuming an S-shape here would be
+inventing a curve the plan never gave.
+
+`schedule_variance` is actual minus planned completion in percentage points,
+negative meaning behind plan.
+
+### Endpoints
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `…/schedules/{sid}/activities/{aid}/progress` | project manager |
+| GET | `…/schedules/{sid}/activities/{aid}/progress` | project member |
+| GET | `…/schedules/{sid}/progress/rollup` | project member |
+| POST | `…/schedules/{sid}/progress/apply-matches` | project manager |
+| GET | `…/schedules/{sid}/analytics/summary?as_of=` | project member |
+| GET | `…/schedules/{sid}/analytics/s-curve` | project member |
+
+All of them prove the schedule belongs to the project in the path and the
+activity belongs to that schedule, so a guessed or foreign id is a 404 rather
+than a cross-tenant read.
 
 ## Authorization model
 
