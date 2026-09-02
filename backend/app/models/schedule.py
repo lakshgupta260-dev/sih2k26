@@ -6,12 +6,14 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     Float,
     ForeignKey,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -51,6 +53,10 @@ class Schedule(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
 class Activity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """An individual task/activity within a schedule."""
     __tablename__ = "activities"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "activity_code", name="uq_activity_code_per_schedule"),
+        CheckConstraint("level >= 1 AND level <= 6", name="ck_activities_level_range"),
+    )
 
     schedule_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False, index=True
@@ -94,6 +100,9 @@ class Activity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class ActivityDependency(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Represents a relationship between two activities (e.g. Finish-to-Start)."""
     __tablename__ = "activity_dependencies"
+    __table_args__ = (
+        CheckConstraint("predecessor_id != successor_id", name="ck_activity_dependencies_no_self"),
+    )
 
     schedule_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="CASCADE"), nullable=False, index=True
