@@ -106,7 +106,13 @@ def test_unsupported_processor_extension(tmp_path: Path) -> None:
 
 # -------------------------------------------------------------------- 3. API & Task Integration Tests
 def test_document_upload_job_polling_and_report_retrieval(
-    client: TestClient, admin_user, auth_headers, db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    admin_user,
+    auth_headers,
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_task_with_test_session,
 ) -> None:
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
     headers = auth_headers(admin_user)
@@ -137,7 +143,12 @@ def test_document_upload_job_polling_and_report_retrieval(
     assert docs_res.status_code == 200
     assert docs_res.json()["total"] == 1
 
-    # 4. Process job explicitly via task (simulating Celery worker execution)
+    # 4. Process job explicitly via task (simulating Celery worker execution).
+    #    The task opens its own SessionLocal, as a real worker must; redirect it
+    #    at the test session so it can see this test's uncommitted rows.
+    import app.tasks.document_tasks as document_tasks
+
+    run_task_with_test_session(document_tasks)
     process_uploaded_file(job_id)
 
     # 5. Check job status endpoint
@@ -176,9 +187,12 @@ def test_tenant_isolation_on_documents_and_reports(
     upload_res = client.post(f"{PROJECTS}/{project_id}/documents", files=files, headers=admin_hdrs)
     assert upload_res.status_code == 202
 
-    # Unenrolled supervisor should be forbidden (403) from listing or reading documents
+    # An unenrolled user must get 404, not 403. Confirming that a project id
+    # exists is itself a leak across the tenancy boundary, so project access
+    # resolves to NotFound rather than PermissionDenied -- the same convention
+    # /projects/{id} follows (see backend/README.md, Authorization model).
     forbidden_docs = client.get(f"{PROJECTS}/{project_id}/documents", headers=supervisor_hdrs)
-    assert forbidden_docs.status_code == 403
+    assert forbidden_docs.status_code == 404
 
     forbidden_reports = client.get(f"{PROJECTS}/{project_id}/reports", headers=supervisor_hdrs)
-    assert forbidden_reports.status_code == 403
+    assert forbidden_reports.status_code == 404

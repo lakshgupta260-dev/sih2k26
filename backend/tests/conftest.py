@@ -125,6 +125,37 @@ def anon_client(app: FastAPI) -> Iterator[TestClient]:
         yield test_client
 
 
+@pytest.fixture
+def run_task_with_test_session(db: Session, monkeypatch: pytest.MonkeyPatch):
+    """Point a Celery task's own ``SessionLocal`` at this test's session.
+
+    Tasks correctly open their own session -- a real worker is a separate
+    process with no request context. Under the rollback-isolated fixture that
+    session sits on a different connection and cannot see the test's
+    uncommitted rows, so a task invoked synchronously would silently find
+    nothing and no-op. This redirects it to the test session and neutralises
+    ``close()``, so the fixture keeps ownership of the transaction.
+
+    Usage::
+
+        import app.tasks.document_tasks as document_tasks
+        run_task_with_test_session(document_tasks)
+        process_uploaded_file(job_id)
+    """
+
+    class _SessionProxy:
+        def __getattr__(self, item):
+            return getattr(db, item)
+
+        def close(self) -> None:  # the fixture closes it, not the task
+            pass
+
+    def _patch(task_module) -> None:
+        monkeypatch.setattr(task_module, "SessionLocal", lambda: _SessionProxy())
+
+    return _patch
+
+
 # --------------------------------------------------------------- user factory
 DEFAULT_PASSWORD = "TestPass123"
 
