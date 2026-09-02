@@ -9,9 +9,9 @@ progress. Built as a modular monolith.
 |---|---|---|
 | 1 | Scaffolding, config, DB, Alembic, Docker | **Done, validated** |
 | 2 | Auth, RBAC, users, projects | **Done, validated** |
-| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | Not started |
-| 4 | Report upload, document processing, processing jobs | Not started |
-| 5 | AI extraction, matching, confidence, human review | Not started |
+| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | **Done** |
+| 4 | Report upload, document processing, processing jobs | **Done** |
+| 5 | AI extraction, matching, confidence, human review | **Done, validated** |
 | 6 | Progress engine, planned-vs-actual analytics | Not started |
 | 7 | ML delay prediction, risk, explainability | Not started |
 | 8 | Report generation, notifications | Not started |
@@ -187,6 +187,71 @@ string or a JSON array.
 
 Every response carries `X-Request-ID`; supply your own to trace a call through
 the logs.
+
+## Extraction and matching (Phase 5)
+
+The planning-to-execution bridge. Field text becomes linked, reviewable
+activity events.
+
+### Honesty about what is AI
+
+| Component | What it actually is |
+|---|---|
+| Extraction | **Deterministic rules.** Domain vocabulary, regex field parsing, tense/modality classification. Fast, free, reproducible, auditable. |
+| LLM extraction | **Interface only, inactive by default.** With no `LLM_API_KEY` the provider reports itself unavailable and nothing is fabricated. Every run response states `llm_available`. |
+| `EMBEDDING_PROVIDER=tfidf` | **Lexical** vector similarity (word + character n-grams). Strong on abbreviations and typos, blind to synonyms sharing no characters. Named accordingly, not passed off as semantic. |
+| `EMBEDDING_PROVIDER=sentence_transformer` | **True semantic embeddings.** Opt-in; needs `pip install sentence-transformers` (~1–2 GB of torch). Falls back to tfidf automatically if absent. |
+
+`auto_precision` in `/matching/stats` is measured against human decisions, not
+estimated. It is `null` until reviews exist.
+
+### The seven signals
+
+Each returns 0..1 or `None`. **`None` is not zero** — an unstated discipline
+must not be scored like a wrong one, so the combiner renormalises over the
+signals that were actually available.
+
+| Signal | What it measures |
+|---|---|
+| `exact_code` | Activity code stated in the text. Floored at 0.95 when it resolves — a unique identifier outranks any text similarity. A stated code that does *not* match is negative evidence. |
+| `location` | Chainage or joint-band overlap. Nearly unambiguous on linear works. Compared like-with-like only. |
+| `fuzzy` | rapidfuzz token-set ratio on expanded text. |
+| `embedding` | Cosine from the configured provider. |
+| `keyword` | Containment of the plan activity's vocabulary — not Jaccard, because a field line legitimately carries extra words. |
+| `discipline` | Agreement. `OTHER` counts as unlabelled, not as disagreement. |
+| `hierarchy` | Prefers granular L5/L6 nodes, and nodes near a confident match earlier in the same document. |
+
+The **domain lexicon** (`app/ai/matching/lexicon.py`) is what makes this work at
+all: it bridges `L&B` → "lowering backfilling", `G&T` → "glanding termination",
+`RT` → "radiographic testing". No amount of fuzzy matching or general-corpus
+embedding recovers those. It is curated data, kept apart from scoring logic so a
+planner can review it — extending it is how accuracy improves.
+
+### Two things that are never linked
+
+`PLANNED_NOT_ACTUAL` (future intent — "to be taken up tomorrow") and `NONE`
+(site administration, negation) are refused however well they would score.
+Booking tomorrow's plan as today's progress is the most damaging thing this
+pipeline could do. Both are still stored, because "what did the report say and
+what did we do with it" is the audit question that matters.
+
+Two candidates within 0.05 of each other go to review even above the automatic
+threshold: indistinguishable options are a human's decision, not a guess.
+
+### Endpoints
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `/api/v1/projects/{id}/matching/run` | project manager |
+| GET | `/api/v1/projects/{id}/matching/matches?status=NEEDS_REVIEW` | project member |
+| GET | `/api/v1/projects/{id}/matching/matches/{match_id}` | project member |
+| POST | `/api/v1/projects/{id}/matching/matches/{match_id}/review` | project manager |
+| GET | `/api/v1/projects/{id}/matching/matches/{match_id}/history` | project member |
+| GET | `/api/v1/projects/{id}/matching/stats` | project member |
+| GET | `/api/v1/projects/{id}/matching/extracted` | project member |
+
+Review decisions preserve the machine's original verdict in `auto_status`, so
+the matcher can be scored against human judgement later.
 
 ## Authorization model
 

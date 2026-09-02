@@ -86,11 +86,42 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------- pluggable providers
-    # Concrete implementations arrive in later phases; the names are read from
-    # configuration so a provider can be swapped without touching call sites.
-    LLM_PROVIDER: str = "noop"
-    EMBEDDING_PROVIDER: str = "noop"
+    # Provider names are read from configuration so an implementation can be
+    # swapped without touching any call site.
+    #   LLM_PROVIDER       : "none" | "anthropic" | "openai"
+    #   EMBEDDING_PROVIDER : "tfidf" | "sentence_transformer"
+    #   OCR_PROVIDER       : "noop"
+    LLM_PROVIDER: str = "none"
+    LLM_MODEL: str = ""
+    LLM_API_KEY: str = ""
+    LLM_TIMEOUT_SECONDS: int = 30
+    LLM_MAX_LINES_PER_CALL: int = 40
+
+    EMBEDDING_PROVIDER: str = "tfidf"
+    EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+
     OCR_PROVIDER: str = "noop"
+
+    # ------------------------------------------------- matching thresholds
+    # A candidate scoring at or above AUTO is linked automatically; at or above
+    # REVIEW it is queued for a human; below that it is recorded as unmatched.
+    # Deliberately configurable: the right cut-off depends on how much manual
+    # review a project is willing to absorb.
+    MATCH_AUTO_THRESHOLD: float = Field(default=0.82, ge=0.0, le=1.0)
+    MATCH_REVIEW_THRESHOLD: float = Field(default=0.55, ge=0.0, le=1.0)
+    # How many candidates to keep per extracted line for review and audit.
+    MATCH_MAX_CANDIDATES: int = Field(default=5, ge=1, le=50)
+    # Candidate generation cap before scoring, to bound cost on big schedules.
+    MATCH_BLOCKING_LIMIT: int = Field(default=400, ge=10, le=10000)
+
+    # Signal weights. Normalised at use, so these are relative, not absolute.
+    MATCH_WEIGHT_EXACT_CODE: float = 1.00
+    MATCH_WEIGHT_KEYWORD: float = 0.55
+    MATCH_WEIGHT_FUZZY: float = 0.80
+    MATCH_WEIGHT_EMBEDDING: float = 0.70
+    MATCH_WEIGHT_DISCIPLINE: float = 0.35
+    MATCH_WEIGHT_LOCATION: float = 0.60
+    MATCH_WEIGHT_HIERARCHY: float = 0.25
 
     @field_validator("CORS_ORIGINS", "ALLOWED_UPLOAD_EXTENSIONS", mode="before")
     @classmethod
@@ -112,6 +143,15 @@ class Settings(BaseSettings):
             object.__setattr__(self, "SECRET_KEY", secrets.token_urlsafe(48))
         elif len(self.SECRET_KEY) < 32 and self.ENVIRONMENT in ("production", "staging"):
             raise ValueError("SECRET_KEY must be at least 32 characters.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> "Settings":
+        if self.MATCH_REVIEW_THRESHOLD > self.MATCH_AUTO_THRESHOLD:
+            raise ValueError(
+                "MATCH_REVIEW_THRESHOLD cannot exceed MATCH_AUTO_THRESHOLD; "
+                "nothing would ever be queued for review."
+            )
         return self
 
     @computed_field  # type: ignore[prop-decorator]

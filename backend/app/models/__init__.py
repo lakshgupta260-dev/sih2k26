@@ -6,6 +6,7 @@ which silently produces migrations that create nothing.
 """
 from app.db.base import Base
 from app.models.audit import AuditLog
+from app.models.matching import ActivityMatch, ExtractedActivity
 from app.models.project import Project, ProjectMembership
 from app.models.user import RefreshToken, User
 from app.models.schedule import Schedule, Activity, ActivityDependency
@@ -13,7 +14,9 @@ from app.models.document import ProcessingJob, ProgressReport, UploadedFile
 
 __all__ = [
     "Base",
+    "ActivityMatch",
     "AuditLog",
+    "ExtractedActivity",
     "Project",
     "ProjectMembership",
     "RefreshToken",
