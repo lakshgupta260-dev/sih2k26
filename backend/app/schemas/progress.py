@@ -13,6 +13,7 @@ class ActualProgressCreate(BaseModel):
     actual_finish: date | None = None
     status: ActivityStatus = ActivityStatus.NOT_STARTED
     notes: str | None = None
+    source_report_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def check_dates(self) -> 'ActualProgressCreate':

@@ -43,6 +43,8 @@ class ProgressService:
             existing.actual_finish = payload.actual_finish
             existing.status = payload.status
             existing.notes = payload.notes
+            if payload.source_report_id:
+                existing.source_report_id = payload.source_report_id
             existing.reported_by_id = current_user.id
             progress = existing
         else:
@@ -55,6 +57,7 @@ class ProgressService:
                 actual_finish=payload.actual_finish,
                 status=payload.status,
                 notes=payload.notes,
+                source_report_id=payload.source_report_id,
                 reported_by_id=current_user.id
             )
             self.db.add(progress)

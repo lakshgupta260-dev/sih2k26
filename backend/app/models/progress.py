@@ -24,6 +24,7 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 if TYPE_CHECKING:
     from app.models.schedule import Activity
     from app.models.user import User
+    from app.models.document import ProgressReport
 
 
 class ActualProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -62,6 +63,11 @@ class ActualProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reported_by_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    
+    source_report_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("progress_reports.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     activity: Mapped["Activity"] = relationship()
     reported_by: Mapped["User"] = relationship()
+    source_report: Mapped["ProgressReport"] = relationship()
