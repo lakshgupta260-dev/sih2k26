@@ -45,8 +45,17 @@ def get_activities_tree(
     service = ScheduleService(db)
     activities, _ = service.list_activities(schedule_id, current_user, skip=0, limit=10000)
     
-    # Build tree
-    nodes = {a.id: ActivityTreeNode.model_validate(a) for a in activities}
+    # Build tree.
+    # ActivityTreeNode inherits from_attributes=True, so model_validate()
+    # already populates `children` from the ORM relationship. The explicit
+    # linking below would then append each child a second time, so the
+    # relationship-loaded list is discarded first and the tree is built from
+    # parent_id alone -- one source of truth.
+    nodes = {}
+    for activity in activities:
+        node = ActivityTreeNode.model_validate(activity)
+        node.children = []
+        nodes[activity.id] = node
     roots = []
     
     for a in activities:

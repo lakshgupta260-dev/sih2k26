@@ -61,26 +61,59 @@ def _assert_acyclic(edges: dict[str, set[str]]) -> None:
             visit(node, [node])
 
 
-def _parse_dependency(dep_str: str) -> tuple[str, str, int]:
-    # e.g., "A1010", "A1010FS+3", "A1010SS-2"
+# Predecessor cell formats seen in real exports:
+#   "A1010"          plain code, implicit finish-to-start, no lag
+#   "A1010FS+3"      Primavera, no separator
+#   "A1010 FS+3"     with a separator
+#   "A1010SS-2"      start-to-start, negative lag
+#   "12FS+3 days"    MS Project, with a unit suffix
+#
+# The activity-code group is non-greedy and the pattern is anchored at the end,
+# so the relationship type is claimed by its own group instead of being
+# swallowed by the code. A greedy code group turns "A1FS+3" into the code
+# "A1FS", which matches no activity, and the dependency is silently dropped.
+_DEPENDENCY_RE = re.compile(
+    r"""^\s*
+        (?P<code>.+?)                          # activity code, non-greedy
+        \s*
+        (?P<type>FS|SS|FF|SF)?                  # relationship type
+        \s*
+        (?P<lag>[+-]\s*\d+(?:\.\d+)?)?        # signed lag
+        \s*
+        (?:d|day|days|h|hr|hrs|hour|hours|w|wk|week|weeks)?   # unit suffix
+        \s*$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _parse_dependency(dep_str: str) -> tuple[str, DependencyType, int]:
+    """Split a predecessor cell into (activity_code, relationship, lag).
+
+    An unrecognised cell is treated as a bare activity code with an implicit
+    finish-to-start relationship and no lag, which is how a plain code column
+    behaves.
+    """
     dep_str = str(dep_str).strip()
-    match = re.match(r'^([a-zA-Z0-9_\-]+(?:(?:\.[a-zA-Z0-9_\-]+)*)?)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+(?:\.\d+)?)?', dep_str, re.IGNORECASE)
+    match = _DEPENDENCY_RE.match(dep_str)
     if not match:
         return dep_str, DependencyType.FINISH_TO_START, 0
-    
-    pred_code = match.group(1)
-    dep_type = match.group(2).upper() if match.group(2) else DependencyType.FINISH_TO_START.value
-    lag_str = match.group(3)
-    
+
+    pred_code = match.group("code").strip()
+    raw_type = match.group("type")
+    lag_str = match.group("lag")
+
     lag = 0
     if lag_str:
-        lag = int(float(lag_str.replace(' ', '')))
-        
+        try:
+            lag = int(float(lag_str.replace(" ", "")))
+        except ValueError:
+            lag = 0
+
     try:
-        dtype = DependencyType(dep_type)
+        dtype = DependencyType(raw_type.upper()) if raw_type else DependencyType.FINISH_TO_START
     except ValueError:
         dtype = DependencyType.FINISH_TO_START
-        
+
     return pred_code, dtype, lag
 
 

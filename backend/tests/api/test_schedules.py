@@ -54,7 +54,7 @@ def test_wbs_paths_are_not_type_coerced(client, test_project):
     # check activities
     r = client.get(f"/api/v1/schedules/{sid}/activities", headers=headers)
     assert r.status_code == 200
-    acts = {a["activity_code"]: a["wbs_path"] for a in r.json()}
+    acts = {a["activity_code"]: a["wbs_path"] for a in r.json()["items"]}
     assert acts["A1"] == "1"
     assert acts["A2"] == "1.10" # D1 fixed!
 
@@ -70,7 +70,7 @@ def test_discipline_normalised_to_enum(client, test_project):
     sid = r.json()["id"]
     
     r = client.get(f"/api/v1/schedules/{sid}/activities", headers=headers)
-    acts = {a["activity_code"]: a["discipline"] for a in r.json()}
+    acts = {a["activity_code"]: a["discipline"] for a in r.json()["items"]}
     assert acts["A1"] == "CIVIL"
     assert acts["A2"] == "OTHER"
 
@@ -129,7 +129,7 @@ def test_dependency_type_and_lag_parsed(client, test_project):
     
     # get A2 details
     r = client.get(f"/api/v1/schedules/{sid}/activities", headers=headers)
-    a2_id = next(a["id"] for a in r.json() if a["activity_code"] == "A2")
+    a2_id = next(a["id"] for a in r.json()["items"] if a["activity_code"] == "A2")
     r2 = client.get(f"/api/v1/schedules/{sid}/activities/{a2_id}", headers=headers)
     assert r2.status_code == 200
     preds = r2.json()["predecessors"]
@@ -140,7 +140,7 @@ def test_dependency_type_and_lag_parsed(client, test_project):
 def test_supervisor_cannot_upload_schedule(client, test_project, supervisor_user, auth_headers):
     pid, _ = test_project
     _, h = test_project
-    r = client.post(f"/api/v1/projects/{pid}/members", json={"user_id": str(supervisor_user.id), "role": "MEMBER"}, headers=h)
+    r = client.post(f"/api/v1/projects/{pid}/members", json={"user_id": str(supervisor_user.id), "role": "SITE_SUPERVISOR"}, headers=h)
     assert r.status_code == 201
 
     sh = auth_headers(supervisor_user)
