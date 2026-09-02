@@ -123,6 +123,38 @@ class Settings(BaseSettings):
     MATCH_WEIGHT_LOCATION: float = 0.60
     MATCH_WEIGHT_HIERARCHY: float = 0.25
 
+    # ------------------------------------------------------ delay prediction
+    # Where fitted model artefacts are written. One file per version, kept so a
+    # stored prediction can always be traced to the exact model that made it.
+    ML_MODEL_DIR: str = "storage/models"
+    # Fitting below these counts produces a model whose reported accuracy is
+    # noise. Training refuses and says so rather than returning a number a
+    # planner might act on -- the rule-based forecast is used instead.
+    ML_MIN_TRAINING_SAMPLES: int = Field(default=40, ge=10)
+    ML_MIN_MINORITY_SAMPLES: int = Field(default=8, ge=3)
+    # A fitted model is only promoted if it clears this out-of-fold. 0.5 is a
+    # coin flip, so anything at or below it is worse than useless.
+    ML_MIN_HELDOUT_ROC_AUC: float = Field(default=0.60, ge=0.5, le=1.0)
+    # Stratified cross-validation folds. Preferred over one hold-out split
+    # because on a few dozen rows the reported figure would otherwise depend
+    # mostly on which rows happened to land in the split.
+    ML_CV_FOLDS: int = Field(default=5, ge=2, le=20)
+    # How much the model must beat the rule-based forecast by, in ROC AUC, to
+    # be promoted. This is the guard that catches a homogeneous training set:
+    # near-identical folds give a flattering score that a floor cannot detect,
+    # but the arithmetic scored on the same rows can.
+    ML_BASELINE_MARGIN: float = Field(default=0.02, ge=0.0, le=0.5)
+    ML_N_ESTIMATORS: int = Field(default=300, ge=10, le=2000)
+    ML_MAX_DEPTH: int = Field(default=8, ge=1, le=64)
+    ML_MIN_SAMPLES_LEAF: int = Field(default=3, ge=1, le=100)
+    # Fixed seed so a reported metric is reproducible from the same rows.
+    ML_RANDOM_STATE: int = 42
+
+    # Probability cut-offs for the risk bands surfaced to planners.
+    ML_RISK_MEDIUM_THRESHOLD: float = Field(default=0.35, ge=0.0, le=1.0)
+    ML_RISK_HIGH_THRESHOLD: float = Field(default=0.60, ge=0.0, le=1.0)
+    ML_RISK_CRITICAL_THRESHOLD: float = Field(default=0.80, ge=0.0, le=1.0)
+
     @field_validator("CORS_ORIGINS", "ALLOWED_UPLOAD_EXTENSIONS", mode="before")
     @classmethod
     def _split_csv(cls, v: Any) -> Any:
@@ -151,6 +183,20 @@ class Settings(BaseSettings):
             raise ValueError(
                 "MATCH_REVIEW_THRESHOLD cannot exceed MATCH_AUTO_THRESHOLD; "
                 "nothing would ever be queued for review."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_risk_bands(self) -> "Settings":
+        bands = (
+            self.ML_RISK_MEDIUM_THRESHOLD,
+            self.ML_RISK_HIGH_THRESHOLD,
+            self.ML_RISK_CRITICAL_THRESHOLD,
+        )
+        if list(bands) != sorted(bands):
+            raise ValueError(
+                "ML risk thresholds must increase: MEDIUM <= HIGH <= CRITICAL. "
+                "Out of order, a band would be unreachable."
             )
         return self
 

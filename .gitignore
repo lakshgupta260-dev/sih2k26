@@ -61,3 +61,8 @@ temp/
 .keep_tmp
 backend.zip
 docs.zip
+
+# Phase 7: fitted model artefacts are build outputs, not source. Old versions
+# are kept on disk so a stored prediction still resolves to the model that
+# produced it, but they do not belong in git.
+backend/storage/models/

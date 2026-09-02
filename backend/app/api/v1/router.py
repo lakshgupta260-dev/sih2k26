@@ -14,6 +14,7 @@ from app.api.v1 import (
     documents,
     health,
     matching,
+    prediction,
     progress,
     projects,
     reports,
@@ -35,7 +36,8 @@ api_router.include_router(reports.router)
 api_router.include_router(matching.router)
 api_router.include_router(progress.router)
 api_router.include_router(analytics.router)
+api_router.include_router(prediction.router)
 
 # Registered in later phases:
-#   risks, ml, assistant, notifications, admin,
+#   risks, assistant, notifications, admin,
 #   integrations.meta, integrations.vapi

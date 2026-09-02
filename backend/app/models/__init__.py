@@ -12,12 +12,15 @@ from app.models.user import RefreshToken, User
 from app.models.schedule import Schedule, Activity, ActivityDependency
 from app.models.document import ProcessingJob, ProgressReport, UploadedFile
 from app.models.progress import ActualProgress
+from app.models.prediction import DelayModelVersion, DelayPrediction
 
 __all__ = [
     "Base",
     "ActualProgress",
     "ActivityMatch",
     "AuditLog",
+    "DelayModelVersion",
+    "DelayPrediction",
     "ExtractedActivity",
     "Project",
     "ProjectMembership",

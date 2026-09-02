@@ -107,6 +107,21 @@ class RiskLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+class PredictionMethod(StrEnum):
+    """Which tier produced a delay forecast.
+
+    Always stated on the prediction rather than left to be inferred, so a
+    planner can tell a measured-rate projection from a fitted model's output.
+    """
+
+    # Deterministic rate arithmetic. Always available, fully explainable.
+    RULE_BASED_RATE = "RULE_BASED_RATE"
+    # Fitted random forest, promoted only after passing held-out evaluation.
+    RANDOM_FOREST = "RANDOM_FOREST"
+    # No forecast possible -- typically a plan carrying no finish date.
+    NOT_FORECASTABLE = "NOT_FORECASTABLE"
+
+
 class NotificationChannel(StrEnum):
     IN_APP = "IN_APP"
     EMAIL = "EMAIL"
@@ -123,3 +138,5 @@ class AuditAction(StrEnum):
     MATCH_REJECT = "MATCH_REJECT"
     UPLOAD = "UPLOAD"
     EXPORT = "EXPORT"
+    MODEL_TRAIN = "MODEL_TRAIN"
+    PREDICT_RUN = "PREDICT_RUN"

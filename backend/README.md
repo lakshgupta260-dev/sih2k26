@@ -13,7 +13,7 @@ progress. Built as a modular monolith.
 | 4 | Report upload, document processing, processing jobs | **Done** |
 | 5 | AI extraction, matching, confidence, human review | **Done, validated** |
 | 6 | Progress engine, planned-vs-actual analytics | **Done, validated** |
-| 7 | ML delay prediction, risk, explainability | Not started |
+| 7 | ML delay prediction, risk, explainability | **Done, validated** |
 | 8 | Report generation, notifications | Not started |
 | 9 | Meta / WhatsApp | Not started |
 | 10 | Vapi, AI project assistant | Not started |
@@ -78,8 +78,19 @@ cd backend && source .venv/bin/activate
 pytest -v
 ```
 
-The suite runs without a database. `test_readiness_reports_database_state`
-accepts either 200 or 503 so it is meaningful in both situations.
+The suite runs against a **real PostgreSQL instance**, not SQLite: the schema
+uses JSONB, partial indexes and check constraints, and a SQLite run would pass
+while the production schema was broken. Tests connect to
+`<POSTGRES_DB>_test`, creating it if absent, and each test runs inside a
+transaction that is rolled back afterwards, so they neither see nor leave each
+other's rows.
+
+`tests/test_migrations.py` is a guard rather than a feature test. It asserts a
+single Alembic head, that every revision is reachable, and that
+`alembic upgrade head` produces exactly the schema the models declare. That
+last check exists because the fixtures build the schema with
+`Base.metadata.create_all()` and never run Alembic — which once let a split
+migration head reach `main` invisibly.
 
 ## Architecture
 
@@ -320,6 +331,114 @@ negative meaning behind plan.
 All of them prove the schedule belongs to the project in the path and the
 activity belongs to that schedule, so a guessed or foreign id is a 404 rather
 than a cross-tenant read.
+
+## Delay prediction (Phase 7)
+
+Two tiers, and the response always says which one answered.
+
+### The honest part first
+
+| Tier | What it is | When it runs |
+|---|---|---|
+| `RULE_BASED_RATE` | **Deterministic arithmetic.** At the rate this activity has actually progressed, does the remaining work fit in the remaining days? Plus explicit adjustments for predecessor slip, a stalled reporting cadence and a late start. | Always available, including on day one. Used whenever no fitted model is promoted. |
+| `RANDOM_FOREST` | **Fitted scikit-learn model**, promoted only after passing evaluation. | Only when a model exists, loads cleanly, and was fitted on the feature set the running code builds. |
+| `NOT_FORECASTABLE` | No forecast. The plan gives the activity no finish date, so there is nothing to be late against. | Recorded as such rather than given a probability of zero. |
+
+Even when the forest supplies the probability, the arithmetic is computed and
+attached as the explanation, and its own probability is included as
+`rule_based_probability`. When the two disagree by more than 0.35 the response
+says so in the caveats. A probability with no checkable reasoning behind it is
+not something to reschedule a crew on.
+
+### What training refuses to do
+
+`POST /ml/train` returning `trained: false` is a normal outcome, not an error.
+It trains only on completed activities that have both a planned and an actual
+finish -- real outcomes from the project's own schedules, never synthesised --
+and refuses when the result would not mean anything:
+
+| `reason` | Refused because |
+|---|---|
+| `INSUFFICIENT_SAMPLES` | Fewer completed activities than `ML_MIN_TRAINING_SAMPLES`. Counted in **distinct activities**, not rows. |
+| `INSUFFICIENT_MINORITY_CLASS` | Too few of one outcome. A model fitted on 3 late and 80 on-time predicts the majority class and scores 96% doing it. |
+| `BELOW_ACCURACY_FLOOR` | Out-of-fold ROC AUC under `ML_MIN_HELDOUT_ROC_AUC`. |
+| `NOT_BETTER_THAN_BASELINE` | The model does not beat the rule-based arithmetic on the same rows by `ML_BASELINE_MARGIN`. |
+
+That last one is the guard that matters, and it exists because of a real
+failure found while validating this phase. A homogeneous training population
+-- fifty activities of identical duration and reporting shape -- produces
+cross-validation folds that are near-duplicates of each other. The forest
+reported a **ROC AUC of 1.000** and was worse than useless: it gave an activity
+that provably lands 587 days late a probability of 0.515, where the arithmetic
+said 0.953. No accuracy floor can reject a 1.000. Scoring the arithmetic on the
+same rows does, because the arithmetic cannot overfit.
+
+Both paths are exercised live: on a rate-homogeneous project the model scores
+0.937 against the baseline's 0.944 and is **refused**; on a project where
+lateness is driven by monsoon-season finishes -- something the arithmetic only
+notes without moving its number -- the model scores 1.000 against 0.501 and is
+**promoted**, with `is_monsoon_finish` and the cyclic month features ranked top.
+
+### Where the training rows come from
+
+Getting the sampling moment right is the whole game, and the obvious choice is
+wrong. Building each row *just before its activity finished* looks like a
+careful leakage guard. It is not one: an activity that finishes late is, the day
+before it finishes, already past its planned finish with work outstanding. The
+label is then readable straight off the features, and both tiers score
+near-perfectly without having predicted anything.
+
+So rows are taken **partway through the planned window** -- at 30%, 50% and 70%
+by default -- which is when a planner actually wants an answer and when the
+outcome is still open. Several cutoffs per activity both multiply thin history
+and match the spread of elapsed fractions seen at serving time. Rows from one
+activity are correlated, so cross-validation is **grouped by activity**:
+splitting two cutoffs of the same activity across folds would leak between them.
+
+### The features
+
+26 features, all derived from ingested plan data and booked progress. The set
+is built around **achieved rate against the rate required**, because that ratio
+is what predicts a late finish on execution work; static attributes alone teach
+a model which disciplines were historically unlucky rather than which
+activities are in trouble now. Unknown values carry an explicit `*_known` flag
+rather than a silent zero -- an unstated planned duration and a zero-length one
+are different facts, and a tree will split on the difference if you let it.
+`GET /ml/features` lists them with plain-language labels.
+
+### Explainability
+
+| Tier | What you get |
+|---|---|
+| Rule-based | The arithmetic itself, as named drivers, in the plan's own units: *"achieving about 1.5 m/day with 910 m remaining needs about 617 days, against 30 days left in the plan"*. |
+| Fitted | The same drivers, plus `notable_features`: inputs that are both influential in the model and unusual for this activity, with the direction and how many standard deviations out. |
+
+`notable_features` is labelled in the response as an indication of what stands
+out, **not a decomposition of the probability** — that is the honest limit of
+what a tree ensemble can say without a SHAP dependency, and overselling it
+would be the same mistake as a fabricated accuracy figure.
+
+### Endpoints
+
+| Method | Path | Access |
+|---|---|---|
+| POST | `…/ml/train` | project manager |
+| GET | `…/ml/models` | project member |
+| GET | `…/ml/features` | project member |
+| POST | `…/schedules/{sid}/ml/predict` | project manager |
+| GET | `…/schedules/{sid}/ml/predictions?risk_level=&predicted_late=` | project member |
+| GET | `…/schedules/{sid}/ml/predictions/{activity_id}` | project member |
+| GET | `…/schedules/{sid}/ml/risk-summary?top=` | project member |
+
+An empty risk summary says nothing has been predicted yet; it is not a finding
+of low risk. A summary older than a week says how stale it is. A stale or
+unloadable model artefact falls back to the arithmetic and says the artefact
+was rejected, rather than silently producing numbers.
+
+Training and prediction are also available as Celery tasks
+(`prediction.train_delay_model`, `prediction.predict_schedule`) — fitting 300
+trees and building features for a large schedule should not hold an HTTP
+connection open.
 
 ## Authorization model
 
