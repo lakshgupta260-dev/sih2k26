@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,15 @@ class ScheduleRead(ORMModel):
     description: str | None
     uploaded_by_id: uuid.UUID | None
     status: JobStatus
+    parse_summary: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "What the import actually did: rows read, activities created, and "
+            "every row, date and dependency it could not use. A schedule can "
+            "be COMPLETED and still have dropped predecessor edges -- the "
+            "counts here are where that shows up."
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 

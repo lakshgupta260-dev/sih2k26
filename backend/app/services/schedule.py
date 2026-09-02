@@ -27,11 +27,26 @@ class ScheduleService:
         self.audit = AuditService(db)
 
     # ------------------------------------------------------------- schedules
-    def get_for_user(self, schedule_id: uuid.UUID, user: User) -> Schedule:
+    def get_for_user(
+        self,
+        schedule_id: uuid.UUID,
+        user: User,
+        *,
+        project_id: uuid.UUID | None = None,
+    ) -> Schedule:
+        """Load a schedule the user may see, else 404.
+
+        When ``project_id`` is given the schedule must actually belong to it.
+        Authorising against the schedule's own project alone is not enough: a
+        user who is a member of both A and B could otherwise fetch B's
+        schedule through a URL that says A, and anything auditing or caching
+        by URL would record it under the wrong project.
+        """
         schedule = self.schedules.get_by(id=schedule_id, is_deleted=False)
         if schedule is None:
             raise NotFoundError("Schedule not found.")
-        # Ensure user can see the project
+        if project_id is not None and schedule.project_id != project_id:
+            raise NotFoundError("Schedule not found.")
         self.projects.get_for_user(schedule.project_id, user)
         return schedule
 
@@ -73,13 +88,36 @@ class ScheduleService:
         return schedule
     
     # ------------------------------------------------------------- activities
-    def get_activity_for_user(self, activity_id: uuid.UUID, user: User) -> Activity:
+    def get_activity_for_user(
+        self,
+        activity_id: uuid.UUID,
+        user: User,
+        *,
+        schedule_id: uuid.UUID | None = None,
+    ) -> Activity:
+        """Load an activity the user may see, else 404.
+
+        ``schedule_id`` is checked for the same reason the project is checked
+        on a schedule: an activity reached through the wrong schedule's URL is
+        a broken invariant even when the caller is entitled to see it.
+        """
         activity = self.activities.get(activity_id)
         if activity is None:
             raise NotFoundError("Activity not found.")
-        # Ensure user can see the schedule/project
+        if schedule_id is not None and activity.schedule_id != schedule_id:
+            raise NotFoundError("Activity not found.")
         self.get_for_user(activity.schedule_id, user)
         return activity
+
+    def activity_tree(self, schedule_id: uuid.UUID, user: User) -> list[Activity]:
+        """Every activity in a schedule, ordered, for tree building.
+
+        Deliberately unpaginated but bounded by the schedule: a tree with an
+        offset window in it is not a tree, and truncating the list makes every
+        activity whose parent fell outside the window look like a root.
+        """
+        self.get_for_user(schedule_id, user)
+        return list(self.activities.list_all_by_schedule(schedule_id))
 
     def list_activities(
         self, schedule_id: uuid.UUID, user: User, *, skip: int = 0, limit: int = 100

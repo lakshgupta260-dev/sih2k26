@@ -131,7 +131,13 @@ def test_document_upload_job_polling_and_report_retrieval(
     job_id = body["job"]["id"]
 
     assert body["file"]["original_filename"] == "dpr_report.csv"
-    assert body["job"]["status"] in [JobStatus.PENDING, JobStatus.COMPLETED]
+    # PENDING when the broker took the task; FAILED with a stated reason when
+    # no broker is reachable, which is the case in the test environment. What
+    # must never happen is a silent PENDING for a job nothing will ever pick
+    # up -- see the dedicated test below.
+    assert body["job"]["status"] in [
+        JobStatus.PENDING, JobStatus.COMPLETED, JobStatus.FAILED
+    ]
 
     # 2. Get document detail
     doc_res = client.get(f"{PROJECTS}/{project_id}/documents/{uploaded_file_id}", headers=headers)
@@ -170,6 +176,89 @@ def test_document_upload_job_polling_and_report_retrieval(
     report_body = report_detail_res.json()
     assert "ACT-1" in report_body["raw_text"]
     assert report_body["extracted_data"]["rows"] == 2
+
+
+def test_a_job_that_could_not_be_queued_says_so_instead_of_waiting_forever(
+    client: TestClient,
+    admin_user,
+    auth_headers,
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broker outage at upload time must be visible on the job.
+
+    Leaving the job PENDING with no task id meant a client polling /jobs/{id}
+    waited on a job that existed nowhere. The file is still stored and the job
+    is re-runnable, but the reason is recorded.
+    """
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    headers = auth_headers(admin_user)
+    project_id = _create_project(client, headers)
+
+    import app.tasks.document_tasks as document_tasks
+
+    def _broker_down(*args, **kwargs):
+        raise RuntimeError("Connection refused")
+
+    monkeypatch.setattr(document_tasks.process_uploaded_file, "delay", _broker_down)
+
+    csv_bytes = b"ActivityID,Name\nACT-1,Foundation\n"
+    response = client.post(
+        f"{PROJECTS}/{project_id}/documents",
+        files={"file": ("dpr.csv", io.BytesIO(csv_bytes), "text/csv")},
+        data={"document_type": DocumentType.DAILY_PROGRESS_REPORT.value},
+        headers=headers,
+    )
+    assert response.status_code == 202, response.text
+    job = response.json()["job"]
+    assert job["status"] == JobStatus.FAILED.value
+    assert "queue" in (job["error_message"] or "").lower()
+
+    # The upload itself survived, so nothing has to be re-sent.
+    docs = client.get(f"{PROJECTS}/{project_id}/documents", headers=headers).json()
+    assert docs["total"] == 1
+
+
+def test_a_completed_job_is_not_reprocessed_or_downgraded(
+    client: TestClient,
+    admin_user,
+    auth_headers,
+    db: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_task_with_test_session,
+) -> None:
+    """Celery redelivers tasks. A second delivery of a completed job must be a
+    no-op, not a second report or a COMPLETED job flipped to FAILED."""
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
+    headers = auth_headers(admin_user)
+    project_id = _create_project(client, headers)
+
+    response = client.post(
+        f"{PROJECTS}/{project_id}/documents",
+        files={"file": ("dpr.csv", io.BytesIO(b"ActivityID,Name\nACT-1,Foundation\n"),
+                        "text/csv")},
+        data={"document_type": DocumentType.DAILY_PROGRESS_REPORT.value},
+        headers=headers,
+    )
+    job_id = response.json()["job"]["id"]
+
+    import app.tasks.document_tasks as document_tasks
+
+    run_task_with_test_session(document_tasks)
+    process_uploaded_file(job_id)
+    first = client.get(f"/api/v1/jobs/{job_id}", headers=headers).json()
+    assert first["status"] == JobStatus.COMPLETED.value
+
+    # Redelivery.
+    process_uploaded_file(job_id)
+    second = client.get(f"/api/v1/jobs/{job_id}", headers=headers).json()
+    assert second["status"] == JobStatus.COMPLETED.value
+    assert second["completed_at"] == first["completed_at"], "job was reprocessed"
+
+    reports = client.get(f"{PROJECTS}/{project_id}/reports", headers=headers).json()
+    assert reports["total"] == 1, "redelivery created a duplicate report"
 
 
 def test_tenant_isolation_on_documents_and_reports(

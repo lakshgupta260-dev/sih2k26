@@ -9,8 +9,8 @@ progress. Built as a modular monolith.
 |---|---|---|
 | 1 | Scaffolding, config, DB, Alembic, Docker | **Done, validated** |
 | 2 | Auth, RBAC, users, projects | **Done, validated** |
-| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | **Done** |
-| 4 | Report upload, document processing, processing jobs | **Done** |
+| 3 | Schedule upload, Excel/CSV parsing, L1–L6, dependencies | **Done, validated** |
+| 4 | Report upload, document processing, processing jobs | **Done, validated** |
 | 5 | AI extraction, matching, confidence, human review | **Done, validated** |
 | 6 | Progress engine, planned-vs-actual analytics | **Done, validated** |
 | 7 | ML delay prediction, risk, explainability | **Done, validated** |
@@ -439,6 +439,95 @@ Training and prediction are also available as Celery tasks
 (`prediction.train_delay_model`, `prediction.predict_schedule`) — fitting 300
 trees and building features for a large schedule should not hold an HTTP
 connection open.
+
+## Schedule ingestion (Phase 3)
+
+### Nothing is dropped silently
+
+Every import returns and stores a `parse_summary`:
+
+```json
+{"rows_read": 412, "activities_created": 409, "rows_skipped_blank": 3,
+ "dependencies_created": 387, "dependencies_duplicate": 4,
+ "predecessors_unresolved": 11, "dates_unparsed": 0,
+ "parents_relinked_to_ancestor": 2, "warnings": ["..."]}
+```
+
+A schedule can import `COMPLETED` and still have dropped predecessor edges —
+a typo'd predecessor code, a row filtered out as blank, a date in a format we
+could not read. Those used to vanish with no trace, so nobody went looking.
+The counts are exact; only the example warnings are capped.
+
+### Ambiguity resolved in a fixed order
+
+**Dates** get three passes, and the order is the point: ISO 8601 first
+(`2026-05-01` is unambiguously 1 May — passing `dayfirst` at an ISO string
+makes pandas return 5 January), then day-first for what remains
+(`03/04/2026` in an Indian or European export means 3 April), then one
+generic attempt for named months. A single column can hold all three
+without either being misread. What survives all three is null *and counted*.
+
+**Dependency lag** is a float column in days, so a stated unit is converted
+on the way in: `A1010FS+8h` is eight hours, not eight days, and `+0.5` is
+half a day rather than zero.
+
+**WBS gaps** attach to the nearest existing ancestor. An export listing only
+leaf rows has no `1.2` for a `1.2.3` to hang off; taking the immediate parent
+alone left such nodes parentless, and they then surfaced as top-level roots
+beside real L1 activities — a flat list presented as a hierarchy. Each relink
+is counted. Duplicate WBS paths are rejected outright, since two rows claiming
+one node makes parent linking arbitrary.
+
+### Validation before anything is written
+
+The column mapping and the file are both checked before the schedule row is
+created. Creating it first turned a malformed mapping into an unhandled 500
+*and* left a schedule stuck in `PENDING` forever, because the code that marks
+a schedule `FAILED` lives inside the parser and was never reached. Size,
+extension and emptiness are enforced here too — this endpoint has its own,
+narrower format list than the global upload allowlist, since accepting a PDF
+would create a schedule row and then fail on read.
+
+Extension matching is case-insensitive (`SCHEDULE.CSV` is Excel-on-Windows'
+default), and `.xls` is read with `xlrd` rather than `openpyxl`, which cannot
+read the legacy BIFF format at all.
+
+Cycle detection is iterative. A linear finish-to-start chain of a few thousand
+activities is routine on a pipeline, and recursion blew the stack at around a
+thousand — surfacing to the user as a file-content complaint.
+
+### Trees and scoping
+
+`/activities/tree` returns the whole schedule unpaginated. A tree with an
+offset window in it is not a tree: a truncated list makes every activity whose
+parent fell outside the window look like a root. The ORM `children`
+relationship is `raiseload`ed and the tree is built from `parent_id` alone, so
+serialisation cannot silently trigger one query per activity.
+
+Ids are checked against their parents, not just for access: a schedule id from
+another project, or an activity id from another schedule, is a 404 even when
+the caller can see both. Authorising against the object's own project alone
+let a member of two projects fetch one project's schedule through the other's
+URL.
+
+## Document processing (Phase 4)
+
+Jobs are claimed under `SELECT ... FOR UPDATE` before any work starts. Celery
+redelivers tasks — `acks_late`, visibility timeouts, manual retries — and
+without a claim two workers process the same upload, the second trips the
+unique constraint on `progress_reports.uploaded_file_id`, and the job is
+marked `FAILED` *after* the first worker marked it `COMPLETED`. A redelivery
+is now a no-op, and a retry of a job whose report already landed refreshes it
+rather than failing.
+
+If the broker is unreachable at upload time the job is marked `FAILED` with
+the reason. The file is still stored and the job is re-runnable; what it no
+longer does is sit in `PENDING` with no task id, leaving a client polling
+`/jobs/{id}` forever on a job that existed nowhere.
+
+Note that document upload deliberately requires only project **membership**,
+not the manager role, unlike schedule upload — a site supervisor filing a
+daily progress report is the primary use case for this endpoint.
 
 ## Authorization model
 

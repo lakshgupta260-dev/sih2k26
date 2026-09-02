@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Sequence
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, raiseload
 
 from app.models.schedule import Schedule, Activity, ActivityDependency
 from app.repositories.base import BaseRepository
@@ -44,6 +44,23 @@ class ActivityRepository(BaseRepository[Activity]):
             .order_by(Activity.wbs_path)
             .offset(skip)
             .limit(limit)
+        )
+        return self.db.execute(stmt).scalars().all()
+
+    def list_all_by_schedule(self, schedule_id: uuid.UUID) -> Sequence[Activity]:
+        """Every activity in one schedule, for whole-tree operations.
+
+        ``raiseload`` on the children relationship is the point: the tree is
+        assembled from ``parent_id`` in Python, and leaving the relationship
+        lazy meant serialisation quietly triggered one SELECT per activity
+        (recursively) whose result was then discarded. Now an accidental access
+        raises instead of costing thousands of queries.
+        """
+        stmt = (
+            select(Activity)
+            .filter_by(schedule_id=schedule_id)
+            .options(raiseload(Activity.children), raiseload(Activity.parent))
+            .order_by(Activity.wbs_path)
         )
         return self.db.execute(stmt).scalars().all()
 

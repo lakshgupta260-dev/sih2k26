@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +44,14 @@ class Schedule(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     
     status: Mapped[JobStatus] = mapped_column(
         String(32), nullable=False, default=JobStatus.COMPLETED
+    )
+
+    # What the parse actually did: rows read, activities created, and every
+    # row, date and dependency it could not use. Stored rather than logged
+    # because "the schedule imported COMPLETED but a third of the dependency
+    # network was dropped" is only discoverable if the counts survive.
+    parse_summary: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
     )
 
     project: Mapped["Project"] = relationship()

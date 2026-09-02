@@ -4,7 +4,8 @@ import hashlib, io, uuid, zipfile
 from pathlib import Path
 from sqlalchemy.orm import Session
 from app.core.config import settings
-from app.core.constants import AuditAction, DocumentType
+from app.core.logging import get_logger
+from app.core.constants import AuditAction, DocumentType, JobStatus
 from app.core.exceptions import NotFoundError, ValidationError
 from app.models.document import ProcessingJob, ProgressReport, UploadedFile
 from app.models.user import User
@@ -12,6 +13,9 @@ from app.repositories.document import ProcessingJobRepository, ProgressReportRep
 from app.services.audit import AuditService
 from app.services.auth import RequestContext
 from app.services.project import ProjectService
+
+logger = get_logger(__name__)
+
 
 class UploadValidator:
     types = {".pdf": {"application/pdf"}, ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}, ".xls": {"application/vnd.ms-excel"}, ".csv": {"text/csv", "application/csv"}, ".txt": {"text/plain"}, ".xml": {"application/xml", "text/xml"}, ".png": {"image/png"}, ".jpg": {"image/jpeg"}, ".jpeg": {"image/jpeg"}}
@@ -50,10 +54,27 @@ class DocumentService:
             self.db.commit(); self.db.refresh(uploaded); self.db.refresh(job)
         except Exception:
             self.db.rollback(); target.unlink(missing_ok=True); raise
+        # Queueing is a separate transaction: the file and its job row are
+        # already committed, so a broker outage must not lose them.
         try:
             from app.tasks.document_tasks import process_uploaded_file
-            job.celery_task_id = process_uploaded_file.delay(str(job.id)).id; self.db.commit(); self.db.refresh(job)
-        except Exception: self.db.rollback()
+            job.celery_task_id = process_uploaded_file.delay(str(job.id)).id
+            self.db.commit(); self.db.refresh(job)
+        except Exception as exc:  # noqa: BLE001 - broker reachability is not ours
+            # Swallowing this silently left the job PENDING with no task id and
+            # nothing that would ever pick it up, so a client polling
+            # /jobs/{id} waited forever on a job that did not exist anywhere.
+            # Marking it FAILED with the reason makes the outage visible and
+            # the job re-runnable.
+            self.db.rollback()
+            logger.error("document_job_not_queued", extra={"job_id": str(job.id), "error": str(exc)})
+            try:
+                job.status = JobStatus.FAILED
+                job.error_message = f"Could not queue processing: {exc}"[:4000]
+                self.db.commit(); self.db.refresh(job)
+            except Exception:  # noqa: BLE001
+                self.db.rollback()
+                logger.exception("document_job_status_not_recorded", extra={"job_id": str(job.id)})
         return uploaded, job
     def get_job(self, job_id: uuid.UUID, actor: User) -> ProcessingJob:
         job = self.jobs.get(job_id)
