@@ -6,6 +6,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     Float,
     ForeignKey,
@@ -30,6 +31,12 @@ class ActualProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "actual_progress"
     __table_args__ = (
         UniqueConstraint("activity_id", "reporting_date", name="uq_progress_activity_date"),
+        CheckConstraint("actual_quantity IS NULL OR actual_quantity >= 0", name="ck_progress_quantity_positive"),
+        CheckConstraint("percent_complete IS NULL OR (percent_complete >= 0 AND percent_complete <= 100)", name="ck_progress_percent_range"),
+        CheckConstraint(
+            "actual_start IS NULL OR actual_finish IS NULL OR actual_start <= actual_finish",
+            name="ck_progress_dates"
+        ),
     )
 
     activity_id: Mapped[uuid.UUID] = mapped_column(
@@ -40,6 +47,7 @@ class ActualProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     
     # The absolute total quantity completed up to this reporting date
     actual_quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    percent_complete: Mapped[float | None] = mapped_column(Float, nullable=True)
     
     # Track the actual start and finish dates if they happened
     actual_start: Mapped[date | None] = mapped_column(Date, nullable=True)

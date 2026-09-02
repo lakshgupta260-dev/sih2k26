@@ -38,6 +38,7 @@ class ProgressService:
         
         if existing:
             existing.actual_quantity = payload.actual_quantity
+            existing.percent_complete = payload.percent_complete
             existing.actual_start = payload.actual_start
             existing.actual_finish = payload.actual_finish
             existing.status = payload.status
@@ -49,6 +50,7 @@ class ProgressService:
                 activity_id=activity_id,
                 reporting_date=payload.reporting_date,
                 actual_quantity=payload.actual_quantity,
+                percent_complete=payload.percent_complete,
                 actual_start=payload.actual_start,
                 actual_finish=payload.actual_finish,
                 status=payload.status,
@@ -114,6 +116,8 @@ class ProgressService:
                 if prog:
                     if act.budgeted_quantity and prog.actual_quantity:
                         comp = min(1.0, prog.actual_quantity / act.budgeted_quantity)
+                    elif prog.percent_complete is not None:
+                        comp = prog.percent_complete / 100.0
                     elif prog.status == ActivityStatus.COMPLETED:
                         comp = 1.0
                     
