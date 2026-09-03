@@ -242,6 +242,9 @@ class Settings(BaseSettings):
     META_ACCESS_TOKEN: str | None = None
     META_PHONE_NUMBER_ID: str | None = None
 
+    # ----- Vapi / Voice Assistant -------------------------------------------
+    VAPI_SECRET: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
