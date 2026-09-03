@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime, timezone
+from html import escape
 from typing import Any
 
 from reportlab.lib import colors
@@ -62,7 +63,7 @@ class PDFReportBuilder(BaseReportBuilder):
 
         # Header Title
         report_title = data.get("title", "Project Progress & Delay Risk Report")
-        elements.append(Paragraph(report_title, title_style))
+        elements.append(Paragraph(escape(report_title), title_style))
         elements.append(Spacer(1, 8))
 
         # Project Metadata Box
@@ -70,15 +71,15 @@ class PDFReportBuilder(BaseReportBuilder):
         meta_data = [
             [
                 Paragraph("<b>Project:</b>", body_style),
-                Paragraph(self.project_name, body_style),
+                Paragraph(escape(self.project_name), body_style),
                 Paragraph("<b>Generated:</b>", body_style),
                 Paragraph(generated_at, body_style),
             ],
             [
                 Paragraph("<b>Discipline Filter:</b>", body_style),
-                Paragraph(str(self.parameters.get("discipline") or "All"), body_style),
+                Paragraph(escape(str(self.parameters.get("discipline") or "All")), body_style),
                 Paragraph("<b>Status Filter:</b>", body_style),
-                Paragraph(str(self.parameters.get("status") or "All"), body_style),
+                Paragraph(escape(str(self.parameters.get("status") or "All")), body_style),
             ],
         ]
         meta_table = Table(meta_data, colWidths=[100, 170, 80, 190])
@@ -158,11 +159,11 @@ class PDFReportBuilder(BaseReportBuilder):
             for act in activities[:25]:  # Top 25 activities in PDF summary
                 act_rows.append(
                     [
-                        Paragraph(str(act.get("code") or act.get("wbs_path") or "-"), body_style),
-                        Paragraph(str(act.get("name") or "Unnamed"), body_style),
-                        Paragraph(str(act.get("status") or "NOT_STARTED"), body_style),
+                        Paragraph(escape(str(act.get("code") or act.get("wbs_path") or "-")), body_style),
+                        Paragraph(escape(str(act.get("name") or "Unnamed")), body_style),
+                        Paragraph(escape(str(act.get("status") or "NOT_STARTED")), body_style),
                         Paragraph(f"{act.get('progress_pct', 0.0):.0f}%", body_style),
-                        Paragraph(str(act.get("risk_band") or "LOW"), body_style),
+                        Paragraph(escape(str(act.get("risk_band") or "LOW")), body_style),
                     ]
                 )
 

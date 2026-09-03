@@ -64,6 +64,15 @@ def test_notifications_api_endpoints_flow(client: TestClient, db: Session, super
 def test_send_project_notification_endpoint(client: TestClient, test_project, supervisor_user) -> None:
     pid, headers = test_project
 
+    # The recipient must actually belong to the project -- addressing an
+    # arbitrary user id here would let any PM spam anyone in the system.
+    add_res = client.post(
+        f"/api/v1/projects/{pid}/members",
+        json={"user_id": str(supervisor_user.id), "role": "SITE_SUPERVISOR"},
+        headers=headers,
+    )
+    assert add_res.status_code == 201, add_res.text
+
     res = client.post(
         f"/api/v1/projects/{pid}/notifications",
         json={
@@ -79,3 +88,29 @@ def test_send_project_notification_endpoint(client: TestClient, test_project, su
     data = res.json()
     assert data["title"] == "New Baseline"
     assert data["recipient_user_id"] == str(supervisor_user.id)
+
+
+def test_project_notification_rejects_non_member_recipient(
+    client: TestClient, test_project, supervisor_user
+) -> None:
+    """A PM can't address a project notification at a user outside the project.
+
+    Without this check the endpoint is an open relay: any PM could put an
+    arbitrary user id (or, once a real email/WhatsApp provider is wired up,
+    an arbitrary external address) in recipient_user_id and have the platform
+    deliver attacker-controlled content to them.
+    """
+    pid, headers = test_project
+
+    res = client.post(
+        f"/api/v1/projects/{pid}/notifications",
+        json={
+            "channel": "IN_APP",
+            "recipient_user_id": str(supervisor_user.id),
+            "notification_type": "schedule_update",
+            "title": "New Baseline",
+            "body": "Schedule baseline v2 published.",
+        },
+        headers=headers,
+    )
+    assert res.status_code == 422, res.text

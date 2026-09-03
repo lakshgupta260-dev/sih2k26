@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.constants import GeneratedReportFormat, GeneratedReportStatus, UserRole
+from app.core.constants import (
+    ActivityStatus,
+    GeneratedReportFormat,
+    GeneratedReportStatus,
+    RiskLevel,
+    UserRole,
+)
 from app.core.exceptions import NotFoundError, PermissionDeniedError, ValidationError
-from app.models.schedule import Activity
+from app.models.prediction import DelayPrediction
+from app.models.progress import ActualProgress
+from app.models.schedule import Activity, Schedule
 from app.models.project import Project, ProjectMembership
 from app.models.reporting import GeneratedReport
 from app.models.user import User
@@ -71,21 +80,97 @@ class ReportService:
         discipline = parameters.get("discipline")
         status_filter = parameters.get("status")
 
-        query = select(Activity).where(Activity.project_id == project_id)
+        # Activity has no project_id of its own -- it belongs to a schedule,
+        # and the schedule belongs to the project. Filtering Activity directly
+        # by project_id doesn't exist as a column and previously raised
+        # AttributeError on every single call, so every report generation
+        # request failed with a 500 before this fix.
+        query = (
+            select(Activity)
+            .join(Schedule, Activity.schedule_id == Schedule.id)
+            .where(Schedule.project_id == project_id)
+        )
         if discipline:
             query = query.where(Activity.discipline == discipline)
-        if status_filter:
-            query = query.where(Activity.status == status_filter)
 
         activities = self.db.scalars(query.order_by(Activity.activity_code.asc())).all()
+        activity_ids = [a.id for a in activities]
+
+        # Status and percent-complete are not columns on Activity at all --
+        # they live on ActualProgress, one row per activity per reporting
+        # date (see app/services/progress.py, which this mirrors). The prior
+        # implementation read a.status / a.progress_pct / a.actual_duration /
+        # a.planned_duration directly off Activity, none of which exist, so
+        # every one of those reads raised AttributeError the moment a real
+        # activity reached this code (masked in the original tests, which
+        # never seeded any activities). Rows are pulled ascending by
+        # reporting_date so the last write per activity_id is the latest one.
+        latest_progress: dict[uuid.UUID, ActualProgress] = {}
+        if activity_ids:
+            progress_rows = self.db.scalars(
+                select(ActualProgress)
+                .where(ActualProgress.activity_id.in_(activity_ids))
+                .order_by(ActualProgress.reporting_date.asc())
+            ).all()
+            for row in progress_rows:
+                latest_progress[row.activity_id] = row
+
+        if status_filter:
+            activities = [
+                a
+                for a in activities
+                if (latest_progress.get(a.id).status if latest_progress.get(a.id) else ActivityStatus.NOT_STARTED)
+                == status_filter
+            ]
+
+        # Real delay-risk data lives in delay_predictions (Phase 7), keyed by
+        # activity_id. The prior implementation read risk_band/risk_score/
+        # forecast_delay_days straight off Activity via getattr(..., default),
+        # attributes that don't exist on the model -- every activity silently
+        # fell back to the default, so every report always showed "LOW" risk
+        # and an empty risk table no matter what the ML/rule-based predictor
+        # actually forecast. Joining the real prediction rows instead of
+        # fabricating them is required by this project's no-fake-AI rule.
+        predictions_by_activity: dict[uuid.UUID, DelayPrediction] = {}
+        if activity_ids:
+            rows = self.db.scalars(
+                select(DelayPrediction).where(DelayPrediction.activity_id.in_(activity_ids))
+            ).all()
+            predictions_by_activity = {p.activity_id: p for p in rows}
+
+        today = date.today()
+
+        def _status_of(activity: Activity) -> str:
+            progress = latest_progress.get(activity.id)
+            return progress.status if progress is not None else ActivityStatus.NOT_STARTED
+
+        def _percent_of(activity: Activity) -> float:
+            progress = latest_progress.get(activity.id)
+            if progress is None or progress.percent_complete is None:
+                return 0.0
+            return float(progress.percent_complete)
+
+        def _is_delayed(activity: Activity) -> bool:
+            progress = latest_progress.get(activity.id)
+            if activity.planned_finish is None:
+                return False
+            if progress is not None and progress.actual_finish is not None:
+                return progress.actual_finish > activity.planned_finish
+            status = _status_of(activity)
+            return status != ActivityStatus.COMPLETED and activity.planned_finish < today
 
         total = len(activities)
-        completed = sum(1 for a in activities if a.status == "COMPLETED")
-        in_progress = sum(1 for a in activities if a.status == "IN_PROGRESS")
-        delayed = sum(1 for a in activities if a.actual_duration and a.planned_duration and a.actual_duration > a.planned_duration)
-        high_risk = sum(1 for a in activities if getattr(a, "risk_band", "LOW") in ("HIGH", "CRITICAL"))
+        completed = sum(1 for a in activities if _status_of(a) == ActivityStatus.COMPLETED)
+        in_progress = sum(1 for a in activities if _status_of(a) == ActivityStatus.IN_PROGRESS)
+        delayed = sum(1 for a in activities if _is_delayed(a))
+        high_risk = sum(
+            1
+            for a in activities
+            if predictions_by_activity.get(a.id) is not None
+            and predictions_by_activity[a.id].risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+        )
 
-        progress_sum = sum(float(a.progress_pct or 0.0) for a in activities)
+        progress_sum = sum(_percent_of(a) for a in activities)
         progress_pct = (progress_sum / total) if total > 0 else 0.0
 
         activity_data = [
@@ -94,12 +179,41 @@ class ReportService:
                 "name": a.name,
                 "discipline": a.discipline or "",
                 "wbs_path": a.wbs_path or "",
-                "status": a.status or "NOT_STARTED",
-                "progress_pct": float(a.progress_pct or 0.0),
-                "risk_band": getattr(a, "risk_band", "LOW"),
+                "status": _status_of(a),
+                "progress_pct": _percent_of(a),
+                "risk_band": (
+                    predictions_by_activity[a.id].risk_level
+                    if predictions_by_activity.get(a.id) is not None
+                    else "NOT_FORECASTED"
+                ),
             }
             for a in activities
         ]
+
+        risks = []
+        for a in activities:
+            prediction = predictions_by_activity.get(a.id)
+            if prediction is None or prediction.risk_level not in (
+                RiskLevel.MEDIUM,
+                RiskLevel.HIGH,
+                RiskLevel.CRITICAL,
+            ):
+                continue
+            top_factor = "Schedule baseline variance"
+            if prediction.explanation:
+                factors = prediction.explanation.get("top_factors")
+                if factors:
+                    top_factor = ", ".join(str(f) for f in factors[:3])
+            risks.append(
+                {
+                    "code": a.activity_code,
+                    "name": a.name,
+                    "risk_score": float(prediction.probability),
+                    "risk_band": prediction.risk_level,
+                    "forecast_delay_days": int(prediction.forecast_slip_days or 0),
+                    "top_factors": top_factor,
+                }
+            )
 
         return {
             "title": f"Project Progress & Delay Risk Report",
@@ -112,18 +226,7 @@ class ReportService:
                 "progress_pct": round(progress_pct, 1),
             },
             "activities": activity_data,
-            "risks": [
-                {
-                    "code": a.activity_code,
-                    "name": a.name,
-                    "risk_score": float(getattr(a, "risk_score", 0.1)),
-                    "risk_band": getattr(a, "risk_band", "LOW"),
-                    "forecast_delay_days": int(getattr(a, "forecast_delay_days", 0)),
-                    "top_factors": "Schedule baseline variance",
-                }
-                for a in activities
-                if getattr(a, "risk_band", "LOW") in ("MEDIUM", "HIGH", "CRITICAL")
-            ],
+            "risks": risks,
         }
 
     def generate_report(

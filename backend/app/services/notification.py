@@ -141,4 +141,22 @@ class NotificationService:
             if not membership or membership.role not in (UserRole.ADMIN, UserRole.PROJECT_MANAGER):
                 raise PermissionDeniedError("Only project managers or admins can send project notifications")
 
+        # A project notification must stay inside the project: without this,
+        # a PM on one project could address any user id in the system (or any
+        # freeform email/phone in recipient_address) using this project's
+        # notification credentials, which is an open spam/phishing relay once
+        # the email/WhatsApp channels are wired to a real provider.
+        if create_in.recipient_user_id is not None:
+            recipient_membership = self.db.scalar(
+                select(ProjectMembership).where(
+                    ProjectMembership.project_id == project_id,
+                    ProjectMembership.user_id == create_in.recipient_user_id,
+                )
+            )
+            recipient_is_admin = self.db.scalar(
+                select(User.role).where(User.id == create_in.recipient_user_id)
+            ) == UserRole.ADMIN
+            if not recipient_membership and not recipient_is_admin:
+                raise ValidationError("Recipient is not a member of this project")
+
         return self.send_notification(create_in, project_id=project_id)
