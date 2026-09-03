@@ -43,6 +43,9 @@ api_router.include_router(progress.router)
 api_router.include_router(analytics.router)
 api_router.include_router(prediction.router)
 
+from app.api.v1.integrations import meta
+api_router.include_router(meta.router)
+
 # Registered in later phases:
 #   risks, assistant, admin,
-#   integrations.meta, integrations.vapi
+#   integrations.vapi

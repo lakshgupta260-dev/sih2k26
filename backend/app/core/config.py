@@ -236,6 +236,12 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
 
+    # ----- Meta / WhatsApp --------------------------------------------------
+    META_VERIFY_TOKEN: str | None = None
+    META_APP_SECRET: str | None = None
+    META_ACCESS_TOKEN: str | None = None
+    META_PHONE_NUMBER_ID: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
