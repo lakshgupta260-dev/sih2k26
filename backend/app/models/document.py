@@ -29,6 +29,7 @@ class UploadedFile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     document_type: Mapped[DocumentType] = mapped_column(String(40), nullable=False, default=DocumentType.OTHER)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     project: Mapped["Project"] = relationship()
     uploaded_by: Mapped["User | None"] = relationship()
     processing_job: Mapped["ProcessingJob | None"] = relationship(back_populates="uploaded_file", uselist=False)

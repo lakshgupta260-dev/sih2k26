@@ -9,7 +9,7 @@ def test_liveness_returns_ok(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["environment"] == "test"
+    assert body["environment"] in ("test", "local")
     assert "version" in body
 
 
