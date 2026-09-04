@@ -31,6 +31,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    phone_normalised: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True, index=True)
 
     role: Mapped[UserRole] = mapped_column(
         String(32), nullable=False, default=UserRole.SITE_SUPERVISOR, index=True

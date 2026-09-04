@@ -24,7 +24,10 @@ router = APIRouter(prefix="/integrations/meta", tags=["integrations"])
 
 def verify_meta_signature(payload: bytes, signature: str) -> bool:
     """Verify the X-Hub-Signature-256 header."""
-    if not settings.META_APP_SECRET or not signature:
+    if not settings.META_APP_SECRET:
+        logger.error("meta_webhook_refused_no_app_secret_configured")
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+    if not signature:
         return False
     expected = hmac.new(
         settings.META_APP_SECRET.encode(), payload, hashlib.sha256
@@ -44,7 +47,7 @@ async def verify_webhook(
     hub_challenge = request.query_params.get("hub.challenge")
     hub_verify_token = request.query_params.get("hub.verify_token")
 
-    logger.warning(f"Received token: {hub_verify_token}, expected: {settings.META_VERIFY_TOKEN}")
+    logger.info("meta_webhook_verification", extra={"matched": hub_verify_token == settings.META_VERIFY_TOKEN})
 
     if hub_mode == "subscribe" and hub_verify_token == settings.META_VERIFY_TOKEN:
         logger.info("Meta webhook verified successfully.")
@@ -63,14 +66,12 @@ async def receive_webhook(
     """Receive messages from WhatsApp."""
     payload = await request.body()
     
-    # Check signature if META_APP_SECRET is set
-    if settings.META_APP_SECRET:
-        if not verify_meta_signature(payload, x_hub_signature_256):
-            logger.warning("Invalid Meta webhook signature")
-            raise HTTPException(status_code=403, detail="Invalid signature")
+    if not verify_meta_signature(payload, x_hub_signature_256):
+        logger.warning("meta_webhook_invalid_signature")
+        raise HTTPException(status_code=403, detail="Invalid signature")
 
     data = await request.json()
-    logger.warning(f"Incoming Meta webhook: {data}")
+    logger.debug("meta_webhook_received", extra={"entries": len(data.get("entry", []))})
     
     # Return 200 OK immediately as required by Meta
     if data.get("object") != "whatsapp_business_account":
@@ -89,6 +90,15 @@ async def receive_webhook(
             for msg in value["messages"]:
                 msg_type = msg.get("type")
                 sender_wa_id = msg.get("from")
+                wa_message_id = msg.get("id")
+                
+                if wa_message_id:
+                    already = db.execute(
+                        select(UploadedFile).where(UploadedFile.provider_message_id == wa_message_id)
+                    ).scalars().first()
+                    if already:
+                        logger.info("whatsapp_message_already_ingested", extra={"wamid": wa_message_id})
+                        continue
                 
                 if msg_type == "interactive":
                     interactive = msg.get("interactive", {})
@@ -100,8 +110,8 @@ async def receive_webhook(
                                 import httpx
                                 vapi_url = "https://api.vapi.ai/call/phone"
                                 vapi_payload = {
-                                    "phoneNumberId": "f662a968-e48c-4108-b465-c796b45b06a0",
-                                    "assistantId": "3f8b2238-7fc3-4d0d-9324-e35f3f53af9b",
+                                    "phoneNumberId": getattr(settings, "VAPI_PHONE_NUMBER_ID", "f662a968-e48c-4108-b465-c796b45b06a0"),
+                                    "assistantId": getattr(settings, "VAPI_ASSISTANT_ID", "3f8b2238-7fc3-4d0d-9324-e35f3f53af9b"),
                                     "customer": {
                                         "number": f"+{sender_wa_id}"
                                     }
@@ -111,8 +121,8 @@ async def receive_webhook(
                                     "Content-Type": "application/json"
                                 }
                                 try:
-                                    with httpx.Client() as client:
-                                        res = client.post(vapi_url, json=vapi_payload, headers=vapi_headers)
+                                    async with httpx.AsyncClient(timeout=10.0) as client:
+                                        res = await client.post(vapi_url, json=vapi_payload, headers=vapi_headers)
                                         logger.info("Vapi call triggered, status: %s", res.status_code)
                                 except Exception as e:
                                     logger.error("Failed to call Vapi: %s", e)
@@ -123,10 +133,11 @@ async def receive_webhook(
                     
                 text_body = msg.get("text", {}).get("body", "").strip()
                 
-                # Phone matching (WhatsApp provides format like 1234567890, we match on endswith or strip)
-                # To be safe, we match where user.phone contains the sender_wa_id or vice versa
+                def _normalise_phone(raw: str) -> str:
+                    return "".join(ch for ch in raw if ch.isdigit())
+
                 user = db.execute(
-                    select(User).where(User.phone.like(f"%{sender_wa_id}%"))
+                    select(User).where(User.phone_normalised == _normalise_phone(sender_wa_id))
                 ).scalars().first()
                 
                 if not user:
@@ -135,7 +146,7 @@ async def receive_webhook(
                     
                 # Find project. For MVP, we take the first project they are in
                 membership = db.execute(
-                    select(ProjectMembership).where(ProjectMembership.user_id == user.id)
+                    select(ProjectMembership).where(ProjectMembership.user_id == user.id).order_by(ProjectMembership.project_id)
                 ).scalars().first()
                 
                 if not membership:
@@ -176,7 +187,13 @@ async def receive_webhook(
                 db.commit()
                 
                 # Trigger Celery parsing task
-                process_uploaded_file.delay(str(job.id))
+                try:
+                    process_uploaded_file.delay(str(job.id))
+                except Exception as exc:
+                    logger.exception("whatsapp_job_not_queued", extra={"job_id": str(job.id)})
+                    job.status = "FAILED" # Note: JobStatus.FAILED if imported
+                    job.error_message = f"Could not queue for processing: {exc}"[:4000]
+                    db.commit()
                 logger.info("Ingested WhatsApp message from %s for project %s", sender_wa_id, project_id)
 
     return Response(status_code=200)

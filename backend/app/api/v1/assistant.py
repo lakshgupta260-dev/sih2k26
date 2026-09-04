@@ -43,31 +43,97 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         return "\n".join([f"Project {p.name}: Status is {p.status}. Start: {p.planned_start}, Finish: {p.planned_finish}." for p in projects])
         
     elif function_name == "get_delayed_activities":
-        # Simplified for demo: return any activity that has actual_start but no actual_finish, or is just randomly delayed.
-        # Since we don't have a complex delay calculation in MVP, we just return a placeholder or query open activities.
+        from app.models.schedule import Schedule
+        from app.models.progress import ActualProgress
         activities = db.execute(
-            select(Activity).where(Activity.project_id.in_(project_ids)).limit(5)
+            select(Activity)
+            .join(Schedule, Activity.schedule_id == Schedule.id)
+            .where(Schedule.project_id.in_(project_ids))
+            .limit(5)
         ).scalars().all()
+        
         if not activities:
             return "No delayed activities found."
-        return "\n".join([f"Activity {a.activity_code} ({a.name}): Status {a.status}, Planned finish was {a.planned_finish}." for a in activities])
+            
+        latest = db.execute(
+            select(ActualProgress)
+            .where(ActualProgress.activity_id.in_([a.id for a in activities]))
+            .order_by(ActualProgress.activity_id, ActualProgress.reporting_date.desc())
+            .distinct(ActualProgress.activity_id)
+        ).scalars().all() if activities else []
+        by_activity = {row.activity_id: row for row in latest}
+        
+        res = []
+        for a in activities:
+            prog = by_activity.get(a.id)
+            status = prog.status if prog else "UNKNOWN"
+            res.append(f"Activity {a.activity_code} ({a.name}): Status {status}.")
+        return "\n".join(res)
         
     elif function_name == "get_risk_summary":
-        return "Risk Summary: Currently, there are potential delays in concrete pouring due to weather, and a 10% risk of budget overrun in structural steel procurement."
+        from app.models.prediction import DelayPrediction
+        from app.core.constants import RiskLevel
+        rows = db.execute(
+            select(DelayPrediction)
+            .where(DelayPrediction.project_id.in_(project_ids))
+            .where(DelayPrediction.risk_level.in_([RiskLevel.HIGH, RiskLevel.CRITICAL]))
+            .order_by(DelayPrediction.probability.desc())
+            .limit(5)
+        ).scalars().all()
+        
+        if not rows:
+            return ("No delay forecast has been generated for your projects yet. "
+                    "Run a prediction from the dashboard and I can talk you through it.")
+                    
+        lines = [
+            f"{r.risk_level} risk on activity {r.activity_id}: "
+            f"{r.probability:.0%} chance of finishing late"
+            + (f", forecast slip {r.forecast_slip_days} days" if r.forecast_slip_days else "")
+            for r in rows
+        ]
+        return "Top delay risks:\n" + "\n".join(lines)
         
     elif function_name == "get_activity_details":
+        from app.models.schedule import Schedule
+        from app.models.progress import ActualProgress
         activity_code = arguments.get("activity_code")
         if not activity_code:
             return "Error: activity_code is required."
         activity = db.execute(
-            select(Activity).where(Activity.project_id.in_(project_ids)).where(Activity.activity_code == activity_code)
+            select(Activity)
+            .join(Schedule, Activity.schedule_id == Schedule.id)
+            .where(Schedule.project_id.in_(project_ids))
+            .where(Activity.activity_code == activity_code)
         ).scalar_one_or_none()
         if not activity:
             return f"Activity {activity_code} not found."
-        return f"Activity {activity.activity_code}: {activity.name}. Status: {activity.status}. Planned Finish: {activity.planned_finish}. Progress: {activity.actual_progress_pct}%."
+            
+        prog = db.execute(
+            select(ActualProgress)
+            .where(ActualProgress.activity_id == activity.id)
+            .order_by(ActualProgress.reporting_date.desc())
+        ).scalars().first()
+        status = prog.status if prog else "UNKNOWN"
+        pct = prog.percent_complete if prog else 0
+        
+        return f"Activity {activity.activity_code}: {activity.name}. Status: {status}. Progress: {pct}%."
         
     elif function_name == "get_project_report":
-        return "A detailed project report has been requested. It will be generated and sent via WhatsApp shortly."
+        from app.services.reporting import ReportService
+        from app.core.constants import GeneratedReportFormat
+        try:
+            ReportService(db).generate_report(
+                project_id=project_ids[0],
+                report_type="executive_overview",
+                output_format=GeneratedReportFormat.PDF,
+                parameters={},
+                current_user=user
+            )
+            db.commit()
+            return "The executive overview report has been generated and is now available in your project dashboard."
+        except Exception as e:
+            logger.error("Failed to generate report: %s", e)
+            return f"Failed to generate report: {e}"
         
     else:
         return f"Error: Unknown tool {function_name}"

@@ -30,9 +30,10 @@ def test_vapi_webhook_verification_success(client: TestClient, monkeypatch):
 
 @patch("app.tasks.document_tasks.process_uploaded_file.delay")
 def test_vapi_end_of_call_report(mock_delay, client: TestClient, db: Session, monkeypatch, manager_user, test_project):
-    monkeypatch.setattr(settings, "VAPI_SECRET", None)
+    monkeypatch.setattr(settings, "VAPI_SECRET", "test-secret")
     
     manager_user.phone = "1234567890"
+    manager_user.phone_normalised = "1234567890"
     db.commit()
     
     payload = {
@@ -47,7 +48,7 @@ def test_vapi_end_of_call_report(mock_delay, client: TestClient, db: Session, mo
         }
     }
     
-    response = client.post("/api/v1/integrations/vapi/webhook", json=payload)
+    response = client.post("/api/v1/integrations/vapi/webhook", json=payload, headers={"x-vapi-secret": "test-secret"})
     
     assert response.status_code == 200
     
@@ -61,9 +62,10 @@ def test_vapi_end_of_call_report(mock_delay, client: TestClient, db: Session, mo
     mock_delay.assert_called_once_with(str(job.id))
 
 def test_vapi_tool_call(client: TestClient, db: Session, monkeypatch, manager_user, test_project):
-    monkeypatch.setattr(settings, "VAPI_SECRET", None)
+    monkeypatch.setattr(settings, "VAPI_SECRET", "test-secret")
     
     manager_user.phone = "1234567890"
+    manager_user.phone_normalised = "1234567890"
     db.commit()
     
     payload = {
@@ -78,7 +80,7 @@ def test_vapi_tool_call(client: TestClient, db: Session, monkeypatch, manager_us
                 {
                     "id": "call_123",
                     "function": {
-                        "name": "query_project_status",
+                        "name": "get_project_progress",
                         "arguments": {}
                     }
                 }
@@ -86,7 +88,7 @@ def test_vapi_tool_call(client: TestClient, db: Session, monkeypatch, manager_us
         }
     }
     
-    response = client.post("/api/v1/integrations/vapi/webhook", json=payload)
+    response = client.post("/api/v1/integrations/vapi/webhook", json=payload, headers={"x-vapi-secret": "test-secret"})
     assert response.status_code == 200
     
     data = response.json()

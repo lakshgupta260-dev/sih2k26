@@ -46,6 +46,7 @@ def test_meta_webhook_receive_message(mock_delay, client: TestClient, db: Sessio
     
     # We assign a phone number to our manager_user
     manager_user.phone = "1234567890"
+    manager_user.phone_normalised = "1234567890"
     db.commit()
     
     payload = {
