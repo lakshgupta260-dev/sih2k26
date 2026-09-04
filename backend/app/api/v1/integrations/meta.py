@@ -44,6 +44,8 @@ async def verify_webhook(
     hub_challenge = request.query_params.get("hub.challenge")
     hub_verify_token = request.query_params.get("hub.verify_token")
 
+    logger.warning(f"Received token: {hub_verify_token}, expected: {settings.META_VERIFY_TOKEN}")
+
     if hub_mode == "subscribe" and hub_verify_token == settings.META_VERIFY_TOKEN:
         logger.info("Meta webhook verified successfully.")
         return Response(content=hub_challenge, media_type="text/plain")
@@ -68,6 +70,7 @@ async def receive_webhook(
             raise HTTPException(status_code=403, detail="Invalid signature")
 
     data = await request.json()
+    logger.warning(f"Incoming Meta webhook: {data}")
     
     # Return 200 OK immediately as required by Meta
     if data.get("object") != "whatsapp_business_account":
@@ -84,10 +87,40 @@ async def receive_webhook(
             contacts = {c["wa_id"]: c for c in value.get("contacts", [])}
             
             for msg in value["messages"]:
-                if msg.get("type") != "text":
+                msg_type = msg.get("type")
+                sender_wa_id = msg.get("from")
+                
+                if msg_type == "interactive":
+                    interactive = msg.get("interactive", {})
+                    if interactive.get("type") == "button_reply":
+                        button_id = interactive.get("button_reply", {}).get("id")
+                        if button_id == "call_ai":
+                            logger.info("User clicked Call AI Assistant!")
+                            if settings.VAPI_API_KEY:
+                                import httpx
+                                vapi_url = "https://api.vapi.ai/call/phone"
+                                vapi_payload = {
+                                    "phoneNumberId": "f662a968-e48c-4108-b465-c796b45b06a0",
+                                    "assistantId": "3f8b2238-7fc3-4d0d-9324-e35f3f53af9b",
+                                    "customer": {
+                                        "number": f"+{sender_wa_id}"
+                                    }
+                                }
+                                vapi_headers = {
+                                    "Authorization": f"Bearer {settings.VAPI_API_KEY}",
+                                    "Content-Type": "application/json"
+                                }
+                                try:
+                                    with httpx.Client() as client:
+                                        res = client.post(vapi_url, json=vapi_payload, headers=vapi_headers)
+                                        logger.info("Vapi call triggered, status: %s", res.status_code)
+                                except Exception as e:
+                                    logger.error("Failed to call Vapi: %s", e)
+                            continue
+
+                if msg_type != "text":
                     continue # For MVP, only handle text
                     
-                sender_wa_id = msg.get("from")
                 text_body = msg.get("text", {}).get("body", "").strip()
                 
                 # Phone matching (WhatsApp provides format like 1234567890, we match on endswith or strip)
@@ -112,7 +145,8 @@ async def receive_webhook(
                 project_id = membership.project_id
                 
                 # Create UploadedFile
-                storage_path = f"wa_msg_{uuid.uuid4().hex[:12]}.txt"
+                msg_id = f"wa_msg_{uuid.uuid4().hex[:12]}"
+                storage_path = f"{project_id}/{msg_id}.txt"
                 uf = UploadedFile(
                     project_id=project_id,
                     uploaded_by_id=user.id,
@@ -132,15 +166,15 @@ async def receive_webhook(
                     uploaded_file_id=uf.id,
                 )
                 db.add(job)
-                db.commit()
                 
-                # Save text body to storage_path (just mock or write to actual storage)
                 import os
                 full_path = os.path.join(settings.UPLOAD_DIR, storage_path)
-                os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 with open(full_path, "w", encoding="utf-8") as f:
                     f.write(text_body)
                     
+                db.commit()
+                
                 # Trigger Celery parsing task
                 process_uploaded_file.delay(str(job.id))
                 logger.info("Ingested WhatsApp message from %s for project %s", sender_wa_id, project_id)

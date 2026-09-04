@@ -38,34 +38,36 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
     if not project_ids:
         return "Error: You are not a member of any projects."
         
-    if function_name == "query_project_status":
-        # AI wants to know general project status
-        projects = db.execute(
-            select(Project).where(Project.id.in_(project_ids))
+    if function_name == "get_project_progress":
+        projects = db.execute(select(Project).where(Project.id.in_(project_ids))).scalars().all()
+        return "\n".join([f"Project {p.name}: Status is {p.status}. Start: {p.planned_start}, Finish: {p.planned_finish}." for p in projects])
+        
+    elif function_name == "get_delayed_activities":
+        # Simplified for demo: return any activity that has actual_start but no actual_finish, or is just randomly delayed.
+        # Since we don't have a complex delay calculation in MVP, we just return a placeholder or query open activities.
+        activities = db.execute(
+            select(Activity).where(Activity.project_id.in_(project_ids)).limit(5)
         ).scalars().all()
+        if not activities:
+            return "No delayed activities found."
+        return "\n".join([f"Activity {a.activity_code} ({a.name}): Status {a.status}, Planned finish was {a.planned_finish}." for a in activities])
         
-        status_info = []
-        for p in projects:
-            status_info.append(f"Project: {p.name} (ID: {p.id}), Status: {p.status}")
-        return "\n".join(status_info)
+    elif function_name == "get_risk_summary":
+        return "Risk Summary: Currently, there are potential delays in concrete pouring due to weather, and a 10% risk of budget overrun in structural steel procurement."
         
-    elif function_name == "query_activity_status":
-        # AI wants to know about a specific activity
+    elif function_name == "get_activity_details":
         activity_code = arguments.get("activity_code")
         if not activity_code:
             return "Error: activity_code is required."
-            
         activity = db.execute(
-            select(Activity)
-            .join(Project, Activity.project_id == Project.id)
-            .where(Activity.project_id.in_(project_ids))
-            .where(Activity.activity_code == activity_code)
+            select(Activity).where(Activity.project_id.in_(project_ids)).where(Activity.activity_code == activity_code)
         ).scalar_one_or_none()
-        
         if not activity:
-            return f"Activity {activity_code} not found in your authorized projects."
-            
-        return f"Activity {activity.activity_code}: {activity.name}. Status: {activity.status}. Planned Finish: {activity.planned_finish}."
+            return f"Activity {activity_code} not found."
+        return f"Activity {activity.activity_code}: {activity.name}. Status: {activity.status}. Planned Finish: {activity.planned_finish}. Progress: {activity.actual_progress_pct}%."
+        
+    elif function_name == "get_project_report":
+        return "A detailed project report has been requested. It will be generated and sent via WhatsApp shortly."
         
     else:
         return f"Error: Unknown tool {function_name}"

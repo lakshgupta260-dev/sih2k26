@@ -51,15 +51,17 @@ async def vapi_webhook(
 
     if msg_type == "tool-calls":
         # Vapi is asking our backend to execute a tool/function
-        tool_with_tool_call_list = message.get("toolCalls", [])
+        tool_call_list = message.get("toolWithToolCallList", [])
         results = []
-        for tool_call in tool_with_tool_call_list:
+        for item in tool_call_list:
+            tool_call = item.get("toolCall", {})
             function_name = tool_call.get("function", {}).get("name")
             arguments = tool_call.get("function", {}).get("arguments", {})
             call_id = tool_call.get("id")
             
             try:
                 result = await process_tool_call(function_name, arguments, user, db)
+                logger.info(f"Tool {function_name} returned: {result}")
                 results.append({
                     "toolCallId": call_id,
                     "result": result
@@ -71,6 +73,7 @@ async def vapi_webhook(
                     "error": str(e)
                 })
         
+        logger.info(f"Sending back to Vapi: {results}")
         return {"results": results}
 
     elif msg_type == "end-of-call-report":

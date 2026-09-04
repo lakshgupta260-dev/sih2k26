@@ -244,6 +244,7 @@ class Settings(BaseSettings):
 
     # ----- Vapi / Voice Assistant -------------------------------------------
     VAPI_SECRET: str | None = None
+    VAPI_API_KEY: str | None = None
 
 
 @lru_cache
