@@ -202,25 +202,41 @@ def test_webhooks_are_secret_authenticated(client: TestClient, monkeypatch) -> N
     )
 
 
-def test_webhooks_fail_open_without_their_secrets(client: TestClient, monkeypatch) -> None:
-    """Pins the *current, defective* behaviour so a fix is visible as a change.
+def test_webhooks_do_not_fail_open_without_their_secrets(
+    client: TestClient, monkeypatch
+) -> None:
+    """docs/PHASE9-10-AUDIT.md findings 1 and 2, now fixed upstream.
 
-    This test asserts the vulnerability exists. That is deliberate: Phase 11 is
-    not permitted to fix these files, and an unasserted vulnerability tends to
-    be forgotten. When your friend fixes findings 1 and 2, this test will fail
-    -- and that failure is the signal to delete it, because the hole is closed.
+    This test originally pinned the *defective* behaviour on purpose, because
+    Phase 11 was not permitted to touch these files: with no secret
+    configured, both webhooks used to fail open and return 200 to an
+    unauthenticated caller. It was written to fail the moment that changed, as
+    the signal to delete it.
 
-    See docs/PHASE9-10-AUDIT.md findings 1 and 2.
+    It changed: with VAPI_SECRET unset the Vapi webhook now returns 403, and
+    with META_APP_SECRET unset the Meta webhook now returns 503 rather than
+    accepting the call. This replacement pins that fix as the new contract
+    instead of the vulnerability, so a regression back to fail-open behaviour
+    is caught here rather than only in the "secret configured" test above.
     """
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "VAPI_SECRET", None, raising=False)
-
-    response = client.post(
+    vapi = client.post(
         "/api/v1/integrations/vapi/webhook",
         json={"message": {"type": "assistant-request"}},
     )
-    assert response.status_code == 200, (
-        "Vapi webhook no longer fails open with VAPI_SECRET unset -- finding 1 "
-        "appears to be fixed. Delete this test."
+    assert vapi.status_code != 200, (
+        "Vapi webhook fails open (200) with VAPI_SECRET unset -- findings 1 "
+        "has regressed."
+    )
+
+    monkeypatch.setattr(settings, "META_APP_SECRET", None, raising=False)
+    meta = client.post(
+        "/api/v1/integrations/meta/webhook",
+        json={"object": "whatsapp_business_account", "entry": []},
+    )
+    assert meta.status_code != 200, (
+        "Meta webhook fails open (200) with META_APP_SECRET unset -- finding "
+        "2 has regressed."
     )

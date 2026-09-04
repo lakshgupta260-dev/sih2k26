@@ -126,15 +126,14 @@ jobs:
           rm -f "$probe"
 
       - name: Run the test suite with coverage
-        # The one known failure is deselected so this step can act as a gate,
-        # and is then run on its own in the next step so it stays visible. It is
-        # a Phase 9/10 defect documented in docs/PHASE9-10-AUDIT.md finding 10:
-        # vapi.py reads message.toolWithToolCallList while its own test sends
-        # message.toolCalls. Phase 11 is not permitted to modify that file.
-        # Delete the --deselect once it is fixed.
+        # Used to deselect tests/api/test_integrations_vapi.py::test_vapi_tool_call
+        # here -- Phase 9/10 finding 10 (vapi.py read message.toolWithToolCallList
+        # while its own test sent message.toolCalls) -- with a follow-up
+        # informational step to keep the failure visible on the dashboard.
+        # Your friend's audit-fix commit resolved it upstream; verified locally
+        # with a clean run, so both are gone and this step is a normal gate again.
         run: |
           python -m pytest \
-            --deselect tests/api/test_integrations_vapi.py::test_vapi_tool_call \
             --cov=app \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
@@ -154,15 +153,6 @@ jobs:
             echo "::error::$skipped tests skipped -- the test database was probably unreachable"
             exit 1
           fi
-
-      - name: Known Phase 9/10 failure (informational)
-        # Deliberately allowed to fail. This keeps the defect on the dashboard
-        # instead of hiding it behind the --deselect above. When your friend
-        # fixes it, this step goes green and the --deselect can be removed.
-        continue-on-error: true
-        run: |
-          echo "See docs/PHASE9-10-AUDIT.md finding 10."
-          python -m pytest tests/api/test_integrations_vapi.py::test_vapi_tool_call -q -p no:randomly
 
       - name: Enforce the coverage floor
         # Set just below the measured 90% so ordinary churn does not trip it,

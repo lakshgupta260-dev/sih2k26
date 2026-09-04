@@ -3,10 +3,21 @@
 **Scope:** commits `1c65b6b`, `4c0f6e1`, `8c50471` — Meta/WhatsApp integration, Vapi voice
 assistant, and the assistant tool layer.
 
-**Status: no Phase 9/10 file was modified.** This document is a record of findings only.
-Every item below was reproduced against a live `uvicorn` server on a real PostgreSQL
-database and a real Redis broker before being written down. Nothing here is inferred
-from reading the code alone; where a claim rests only on a code read, it says so.
+**Status: no Phase 9/10 file was modified by Phase 11.** This document is a record of
+findings only. Every item below was reproduced against a live `uvicorn` server on a real
+PostgreSQL database and a real Redis broker before being written down. Nothing here is
+inferred from reading the code alone; where a claim rests only on a code read, it says so.
+
+**Update — commit `05d2109`:** the author of Phase 9/10 pushed a fix commit titled "Fix
+all 15 audit issues for Phase 9 & 10 (Security & Stability)". Findings 1, 2, and 10 were
+re-verified live against that commit and confirmed fixed: the Vapi webhook now returns
+403 (not 200) with `VAPI_SECRET` unset, the Meta webhook now returns 503 (not 200) with
+`META_APP_SECRET` unset, and `test_vapi_tool_call` passes. `tests/test_auth_boundary_matrix.py`
+was updated accordingly (the test that pinned the fail-open vulnerability was replaced
+with a regression guard for the fix), and the CI workflow's deselect/informational step
+for the vapi test was removed. The remaining findings (3-9, 11-15) have not been
+individually re-verified against `05d2109` — the commit message claims all 15 are fixed,
+but that has not been checked here point-by-point and should not be assumed.
 
 **Files audited (unchanged):**
 
