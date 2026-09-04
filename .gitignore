@@ -66,3 +66,10 @@ docs.zip
 # are kept on disk so a stored prediction still resolves to the model that
 # produced it, but they do not belong in git.
 backend/storage/models/
+
+# Coverage and test reports (Phase 11 CI writes these)
+.coverage
+coverage.xml
+junit.xml
+pytest-output.txt
+htmlcov/

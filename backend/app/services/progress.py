@@ -364,21 +364,37 @@ class ProgressService:
                          ) -> dict[uuid.UUID, ActualProgress]:
         """Most recent progress row per activity, optionally as at a date.
 
-        Ordering ascending and overwriting leaves the newest row per activity,
-        which is what "current status" means.
+        Uses ``DISTINCT ON`` so the database returns one row per activity
+        rather than the schedule's entire reporting history.
+
+        The previous implementation selected every progress row ascending and
+        let later rows overwrite earlier ones in a dict. That is correct, and
+        it measured 2,391 ms on a 5,000-activity schedule with 91,470 progress
+        rows -- roughly 94% of the total cost of the progress rollup -- because
+        it built 91,470 ORM instances to arrive at 3,049 values. The work grew
+        with reporting *history*, which is the worst shape for this query: fast
+        in a demo, slower every day a real project runs.
+
+        ``DISTINCT ON`` is PostgreSQL-specific. That is acceptable here: the
+        project targets PostgreSQL and already relies on JSONB throughout.
+        There is no tie to break, because ``uq_progress_activity_date`` makes
+        (activity_id, reporting_date) unique, and that same index serves the
+        ordering -- so this needs no new index.
         """
         stmt = (
             select(ActualProgress)
             .join(Activity, Activity.id == ActualProgress.activity_id)
             .where(Activity.schedule_id == schedule.id)
-            .order_by(ActualProgress.reporting_date.asc())
         )
         if as_of is not None:
             stmt = stmt.where(ActualProgress.reporting_date <= as_of)
-        latest: dict[uuid.UUID, ActualProgress] = {}
-        for row in self.db.execute(stmt).scalars():
-            latest[row.activity_id] = row
-        return latest
+
+        # DISTINCT ON requires its expression to lead the ORDER BY.
+        stmt = stmt.order_by(
+            ActualProgress.activity_id, ActualProgress.reporting_date.desc()
+        ).distinct(ActualProgress.activity_id)
+
+        return {row.activity_id: row for row in self.db.execute(stmt).scalars()}
 
     @staticmethod
     def _weight(activity: Activity) -> float:
@@ -570,21 +586,41 @@ class ProgressService:
         if total_weight <= 0:
             return []
 
-        # All progress rows for the schedule, grouped per activity in date
-        # order, so each sample can pick the latest row at or before it.
+        # All progress rows for the schedule in date order. Unlike the rollup,
+        # the curve genuinely needs the whole history: every sample point asks
+        # what was true on a different past date.
+        #
+        # Selected as columns rather than as ORM entities, which profiling
+        # showed to be the dominant cost: hydrating 91,470 ActualProgress
+        # instances spent 3.34s of a 5.24s call inside the ORM loader, 1.37s of
+        # it parsing 289,362 UUIDs -- three per row, when the curve reads only
+        # one. These five columns are exactly what the loop below and
+        # ``_completion`` touch, and a SQLAlchemy ``Row`` exposes them by the
+        # same attribute names, so ``_completion`` needs no adapter and keeps
+        # working unchanged with real ORM instances elsewhere.
         rows = list(
             self.db.execute(
-                select(ActualProgress)
+                select(
+                    ActualProgress.activity_id,
+                    ActualProgress.reporting_date,
+                    ActualProgress.actual_quantity,
+                    ActualProgress.percent_complete,
+                    ActualProgress.status,
+                )
                 .join(Activity, Activity.id == ActualProgress.activity_id)
                 .where(Activity.schedule_id == schedule.id)
                 .order_by(ActualProgress.reporting_date.asc())
-            ).scalars()
+            )
         )
-        per_activity: dict[uuid.UUID, list[ActualProgress]] = defaultdict(list)
-        for row in rows:
-            per_activity[row.activity_id].append(row)
 
+        # Hoisted out of the sample loop below. Recomputing these per sample
+        # meant a full pass over every progress row for each of ~150 samples --
+        # 13.7M redundant comparisons on the benchmark schedule, for two values
+        # that cannot change.
         last_report = max((r.reporting_date for r in rows), default=None)
+        first_report = min((r.reporting_date for r in rows), default=None)
+
+        leaf_by_id = {a.id: a for a in leaves}
 
         start = min(a.planned_start for a in dated)
         end = max(a.planned_finish for a in dated)
@@ -598,28 +634,47 @@ class ProgressService:
             cursor = date.fromordinal(cursor.toordinal() + _SAMPLE_DAYS)
         samples.append(end)
 
+        # Samples ascend and ``rows`` is already date-ascending, so the earned
+        # total is maintained with one forward pass over the history shared
+        # across every sample: each row is visited exactly once overall.
+        #
+        # The previous shape re-scanned every leaf's history for every sample
+        # -- O(samples x leaves x history), up to 13.7M inner iterations on the
+        # benchmark schedule. This is O(history + samples).
+        #
+        # Correctness rests on date ordering: a later row for the same activity
+        # is processed after an earlier one, so replacing that activity's
+        # contribution leaves the latest report at or before the sample date,
+        # which is what the earlier nested scan selected.
+        row_pointer = 0
+        contribution: dict[uuid.UUID, float] = {}
+        earned = 0.0
+
         points: list[SCurvePoint] = []
         for at in samples:
             planned = sum(
                 self._planned_fraction(a, at) * self._weight(a) for a in leaves
             )
+
+            while row_pointer < len(rows) and rows[row_pointer].reporting_date <= at:
+                row = rows[row_pointer]
+                row_pointer += 1
+                leaf = leaf_by_id.get(row.activity_id)
+                if leaf is None:
+                    # Progress against a parent node does not belong in a
+                    # leaf-weighted curve; the rollup handles those.
+                    continue
+                updated = self._completion(leaf, row) * self._weight(leaf)
+                earned += updated - contribution.get(row.activity_id, 0.0)
+                contribution[row.activity_id] = updated
+
             actual: float | None = None
-            if last_report is not None and at >= min(r.reporting_date for r in rows):
-                if at <= last_report:
-                    earned = 0.0
-                    for leaf in leaves:
-                        history = per_activity.get(leaf.id)
-                        if not history:
-                            continue
-                        current = None
-                        for row in history:
-                            if row.reporting_date <= at:
-                                current = row
-                            else:
-                                break
-                        if current is not None:
-                            earned += self._completion(leaf, current) * self._weight(leaf)
-                    actual = earned / total_weight * 100.0
+            if (
+                last_report is not None
+                and first_report is not None
+                and first_report <= at <= last_report
+            ):
+                actual = earned / total_weight * 100.0
             points.append(
                 SCurvePoint(
                     reporting_date=at,

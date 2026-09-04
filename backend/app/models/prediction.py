@@ -96,7 +96,8 @@ class DelayModelVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     trained_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
 
 
@@ -164,7 +165,8 @@ class DelayPrediction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     generated_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
 
     model_version: Mapped["DelayModelVersion | None"] = relationship()

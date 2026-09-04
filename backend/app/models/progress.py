@@ -61,7 +61,8 @@ class ActualProgress(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     reported_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     
     source_report_id: Mapped[uuid.UUID | None] = mapped_column(

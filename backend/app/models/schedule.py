@@ -39,7 +39,8 @@ class Schedule(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     
     status: Mapped[JobStatus] = mapped_column(

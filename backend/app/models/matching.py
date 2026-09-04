@@ -141,7 +141,8 @@ class ActivityMatch(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     embedding_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

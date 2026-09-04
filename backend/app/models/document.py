@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class UploadedFile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "uploaded_files"
     project_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     content_type: Mapped[str] = mapped_column(String(150), nullable=False)

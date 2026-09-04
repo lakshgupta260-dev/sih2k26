@@ -11,8 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.hardening import hardening
+from app.core.log_redaction import install_log_redaction
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
+from app.core.rate_limit import RateLimitMiddleware
+from app.core.security_headers import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.db.session import check_database_connection
 
 logger = get_logger(__name__)
@@ -32,6 +36,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     the database finishes coming up rather than crash-looping the API.
     """
     configure_logging(settings.LOG_LEVEL, settings.LOG_JSON)
+    # Must run after configure_logging, which installs the handlers this
+    # attaches to. Mitigates the confirmed secret/PII log leaks documented in
+    # docs/PHASE9-10-AUDIT.md findings 3 and 4.
+    if hardening.LOG_REDACTION_ENABLED:
+        install_log_redaction()
     _ensure_runtime_dirs()
     logger.info(
         "application_starting",
@@ -60,7 +69,17 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Starlette runs middleware in reverse registration order, so the last one
+    # added is the outermost. The ordering below is deliberate:
+    #   CORS (outermost)  -- a rejected preflight must still carry CORS headers
+    #   RateLimit         -- reject floods before any body is read
+    #   BodySizeLimit     -- reject oversized bodies before routing
+    #   SecurityHeaders   -- wraps the app so even error responses get headers
+    #   RequestContext    -- innermost; request id is available to handlers
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
