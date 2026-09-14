@@ -234,6 +234,13 @@ class ProgressService:
         skipped_not_actual = 0
         skipped_no_date = 0
         skipped_other_schedule = 0
+        # Rows created in this batch are still pending, so the SELECT below
+        # cannot see them. Without this, two confirmed matches for the same
+        # activity on the same day -- a DPR line and a WhatsApp message about
+        # the same work, which is the normal case -- both miss the lookup, both
+        # insert, and the flush dies on uq_progress_activity_date, booking
+        # nothing at all.
+        pending: dict[tuple[uuid.UUID, date], ActualProgress] = {}
 
         for match in matches:
             if match.activity_id not in activity_ids:
@@ -255,12 +262,15 @@ class ProgressService:
                 skipped_no_date += 1
                 continue
 
-            existing = self.db.execute(
-                select(ActualProgress).where(
-                    ActualProgress.activity_id == match.activity_id,
-                    ActualProgress.reporting_date == item.event_date,
-                )
-            ).scalar_one_or_none()
+            key = (match.activity_id, item.event_date)
+            existing = pending.get(key)
+            if existing is None:
+                existing = self.db.execute(
+                    select(ActualProgress).where(
+                        ActualProgress.activity_id == match.activity_id,
+                        ActualProgress.reporting_date == item.event_date,
+                    )
+                ).scalar_one_or_none()
 
             row = existing or ActualProgress(
                 activity_id=match.activity_id,
@@ -290,6 +300,7 @@ class ProgressService:
 
             if existing is None:
                 self.db.add(row)
+                pending[key] = row
                 applied += 1
             else:
                 updated += 1
