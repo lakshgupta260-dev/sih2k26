@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.models.project import Project, ProjectMembership
 from app.models.document import UploadedFile, ProcessingJob
-from app.core.constants import DocumentType
+from app.core.constants import DocumentType, JobStatus
 from app.tasks.document_tasks import process_uploaded_file
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,12 @@ async def receive_webhook(
                     content_type="text/plain",
                     size_bytes=len(text_body.encode('utf-8')),
                     sha256=hashlib.sha256(text_body.encode('utf-8')).hexdigest(),
-                    document_type=DocumentType.OTHER
+                    document_type=DocumentType.DAILY_PROGRESS_REPORT,
+                    # Meta retries any delivery it does not see a 200 for, so the
+                    # duplicate guard above is only load-bearing if the id is
+                    # actually stored. Without this the same site report is
+                    # ingested once per retry and counted several times.
+                    provider_message_id=wa_message_id,
                 )
                 db.add(uf)
                 db.flush()
@@ -191,7 +196,7 @@ async def receive_webhook(
                     process_uploaded_file.delay(str(job.id))
                 except Exception as exc:
                     logger.exception("whatsapp_job_not_queued", extra={"job_id": str(job.id)})
-                    job.status = "FAILED" # Note: JobStatus.FAILED if imported
+                    job.status = JobStatus.FAILED
                     job.error_message = f"Could not queue for processing: {exc}"[:4000]
                     db.commit()
                 logger.info("Ingested WhatsApp message from %s for project %s", sender_wa_id, project_id)

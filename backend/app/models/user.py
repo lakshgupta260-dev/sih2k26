@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.constants import UserRole
 from app.db.base import Base
@@ -50,6 +50,22 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     created_projects: Mapped[list["Project"]] = relationship(
         back_populates="created_by", foreign_keys="Project.created_by_id"
     )
+
+    @validates("phone")
+    def _derive_phone_normalised(self, _key: str, value: str | None) -> str | None:
+        """Keep ``phone_normalised`` in step with ``phone`` on every write path.
+
+        The Meta and Vapi webhooks identify an inbound sender/caller by exact
+        match on ``phone_normalised``. Nothing else in the application writes
+        that column, so deriving it here is what makes those lookups resolve at
+        all. Stored as digits only, because the same person arrives as
+        ``+91 98765 43210`` from a profile edit and ``919876543210`` from
+        WhatsApp. Empty normalises to NULL -- the column is UNIQUE, so blanks
+        must not collide across users without a phone.
+        """
+        digits = "".join(ch for ch in (value or "") if ch.isdigit())
+        self.phone_normalised = digits or None
+        return value
 
     @property
     def is_admin(self) -> bool:

@@ -43,32 +43,57 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         return "\n".join([f"Project {p.name}: Status is {p.status}. Start: {p.planned_start}, Finish: {p.planned_finish}." for p in projects])
         
     elif function_name == "get_delayed_activities":
+        import datetime as _dt
+
         from app.models.schedule import Schedule
         from app.models.progress import ActualProgress
-        activities = db.execute(
+        from app.core.constants import ActivityStatus
+
+        today = _dt.date.today()
+
+        # Candidates are activities whose planned finish has passed. Whether one
+        # is actually late depends on its most recent reported progress, which
+        # lives on ActualProgress (one row per activity per reporting date), so
+        # the filtering happens below rather than in SQL.
+        candidates = db.execute(
             select(Activity)
             .join(Schedule, Activity.schedule_id == Schedule.id)
             .where(Schedule.project_id.in_(project_ids))
-            .limit(5)
+            .where(Activity.planned_finish.is_not(None))
+            .where(Activity.planned_finish < today)
+            .order_by(Activity.planned_finish)
         ).scalars().all()
-        
-        if not activities:
-            return "No delayed activities found."
-            
+
+        if not candidates:
+            return "No activities are past their planned finish date. Nothing is delayed right now."
+
         latest = db.execute(
             select(ActualProgress)
-            .where(ActualProgress.activity_id.in_([a.id for a in activities]))
+            .where(ActualProgress.activity_id.in_([a.id for a in candidates]))
             .order_by(ActualProgress.activity_id, ActualProgress.reporting_date.desc())
             .distinct(ActualProgress.activity_id)
-        ).scalars().all() if activities else []
+        ).scalars().all()
         by_activity = {row.activity_id: row for row in latest}
-        
-        res = []
-        for a in activities:
+
+        delayed = []
+        for a in candidates:
             prog = by_activity.get(a.id)
-            status = prog.status if prog else "UNKNOWN"
-            res.append(f"Activity {a.activity_code} ({a.name}): Status {status}.")
-        return "\n".join(res)
+            if prog is not None and prog.status == ActivityStatus.COMPLETED:
+                continue  # finished, however late -- not outstanding work
+            days_late = (today - a.planned_finish).days
+            pct = prog.percent_complete if prog and prog.percent_complete is not None else 0
+            delayed.append(
+                f"{a.activity_code}, {a.name}: {days_late} days past planned finish, "
+                f"{pct:.0f} percent complete."
+            )
+            if len(delayed) == 5:
+                break
+
+        if not delayed:
+            return "Every activity past its planned finish date has been reported complete. Nothing is delayed."
+
+        header = f"{len(delayed)} delayed activit{'y' if len(delayed) == 1 else 'ies'}, worst first:\n"
+        return header + "\n".join(delayed)
         
     elif function_name == "get_risk_summary":
         from app.models.prediction import DelayPrediction
@@ -84,13 +109,25 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         if not rows:
             return ("No delay forecast has been generated for your projects yet. "
                     "Run a prediction from the dashboard and I can talk you through it.")
-                    
-        lines = [
-            f"{r.risk_level} risk on activity {r.activity_id}: "
-            f"{r.probability:.0%} chance of finishing late"
-            + (f", forecast slip {r.forecast_slip_days} days" if r.forecast_slip_days else "")
-            for r in rows
-        ]
+
+        # Name the activities. This is read aloud on a phone call, where a raw
+        # UUID is unusable to the listener.
+        names = {
+            row.id: (row.activity_code, row.name)
+            for row in db.execute(
+                select(Activity.id, Activity.activity_code, Activity.name)
+                .where(Activity.id.in_([r.activity_id for r in rows]))
+            ).all()
+        }
+
+        lines = []
+        for r in rows:
+            code, name = names.get(r.activity_id, (None, None))
+            label = f"{code}, {name}" if code else "an activity no longer in the schedule"
+            line = f"{r.risk_level} risk on {label}: {r.probability:.0%} chance of finishing late"
+            if r.forecast_slip_days:
+                line += f", forecast slip {r.forecast_slip_days} days"
+            lines.append(line + ".")
         return "Top delay risks:\n" + "\n".join(lines)
         
     elif function_name == "get_activity_details":
