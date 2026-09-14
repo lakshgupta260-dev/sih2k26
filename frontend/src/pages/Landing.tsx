@@ -222,9 +222,6 @@ export function Landing() {
                   <p className="text-sm text-onband/55">Built for Oil India Limited</p>
                 </div>
               </div>
-              <p className="text-sm text-onband/55">
-                Smart India Hackathon 2026 · Problem statement 26122
-              </p>
             </div>
           </footer>
         </div>
