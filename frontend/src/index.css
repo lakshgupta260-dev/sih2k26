@@ -1,0 +1,254 @@
+/* Inter is the fallback for machines without SF Pro; on macOS the -apple-system
+   stack in tailwind.config.js resolves to the real SF Pro and this never loads
+   into the rendered type. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap");
+
+/* ----------------------------------------------------------------- theming
+   Both themes are expressed as the same small set of semantic variables, so a
+   component names a role ("card surface", "muted text") and never a literal
+   colour. Flipping `data-theme` on <html> re-skins the whole interior without
+   any component knowing a theme exists.
+
+   Dark is the default, and is what renders before the stored preference is
+   applied, so there is no white flash on load. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-base: 10 10 11;
+  --surface-card: 20 20 22;
+  --surface-raised: 28 28 31;
+  --surface-hover: 35 35 39;
+
+  --content-1: 245 245 247;
+  --content-2: 161 161 166;
+  --content-3: 134 134 139;
+
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.16);
+
+  --overlay-1: rgb(255 255 255 / 0.07);
+  --overlay-2: rgb(255 255 255 / 0.12);
+  --overlay-3: rgb(255 255 255 / 0.18);
+
+  /* Burgundy needs to lift off black and sit down on white, so the accent is
+     a different step of the same ramp per theme rather than one fixed value. */
+  --accent: 219 165 174;
+  --accent-solid: 138 52 70;
+  --accent-contrast: 255 255 255;
+
+  /* Full-bleed landing bands. On light these run pale -> white -> black, the
+     dramatic band being the darkest thing on the page. On dark that inverts:
+     the emphasis band is *lifted* off the base rather than pushed below it,
+     because a black band on a near-black page is no band at all. */
+  --band-1: 10 10 11;
+  --band-2: 22 22 24;
+  --band-3: 33 33 38;
+  --band-4: 23 23 27;
+  --on-band: 245 245 247;
+
+  --aurora-a: rgb(138 52 70 / 0.20);
+  --aurora-b: rgb(0 89 184 / 0.10);
+  --aurora-c: rgb(36 138 61 / 0.10);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-base: 245 245 247;
+  --surface-card: 255 255 255;
+  --surface-raised: 255 255 255;
+  --surface-hover: 240 240 242;
+
+  --content-1: 29 29 31;
+  --content-2: 110 110 115;
+  --content-3: 134 134 139;
+
+  --line: rgb(0 0 0 / 0.10);
+  --line-strong: rgb(0 0 0 / 0.18);
+
+  --overlay-1: rgb(0 0 0 / 0.04);
+  --overlay-2: rgb(0 0 0 / 0.07);
+  --overlay-3: rgb(0 0 0 / 0.11);
+
+  --accent: 123 44 59;
+  --accent-solid: 138 52 70;
+  --accent-contrast: 255 255 255;
+
+  --band-1: 245 245 247;
+  --band-2: 255 255 255;
+  --band-3: 0 0 0;
+  --band-4: 29 29 31;
+  --on-band: 245 245 247;
+
+  --aurora-a: rgb(138 52 70 / 0.10);
+  --aurora-b: rgb(0 89 184 / 0.06);
+  --aurora-c: rgb(36 138 61 / 0.05);
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  /* Everything in the UI is sized in rem, so lifting the root size scales type,
+     padding and gaps together and keeps the proportions intact. 17px is the
+     reference body size and reads comfortably on large external displays. */
+  html {
+    font-size: 18px;
+  }
+
+  @media (max-width: 640px) {
+    html {
+      font-size: 16px;
+    }
+  }
+
+  body {
+    @apply bg-surface-base text-content-1 antialiased;
+    transition: background-color 0.25s ease, color 0.25s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Display type is set tight and slightly negative, matching the reference's
+     -0.009em at 64px. Applied through a class so body copy keeps normal
+     tracking. */
+  .type-display {
+    @apply font-display font-semibold;
+    letter-spacing: -0.015em;
+  }
+
+  /* Metrics must align in columns; proportional digits make tables jitter. */
+  .tnum,
+  table td,
+  table th {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    @apply bg-signal-600 text-white;
+  }
+
+  /* A slim, unobtrusive scrollbar — the default macOS one is fine, this is
+     for the scroll containers that are always visible on Windows/Linux. */
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-overlay-3;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    @apply bg-overlay-3;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-signal-400 ring-offset-2 ring-offset-surface-base;
+  }
+}
+
+@layer components {
+  /* Frosted panel used for the sticky app header and nav — the reference's
+     signature translucent bar. */
+  .glass {
+    background: rgb(var(--surface-base) / 0.72);
+    @apply backdrop-blur-xl backdrop-saturate-150;
+  }
+  .glass-dark {
+    @apply bg-ink-950/75 backdrop-blur-xl backdrop-saturate-150;
+  }
+
+  /* Skeleton shimmer for loading states. */
+  .skeleton {
+    @apply relative overflow-hidden rounded-[10px] bg-overlay-1;
+  }
+  .skeleton::after {
+    @apply absolute inset-0 animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent;
+    content: "";
+    transform: translateX(-100%);
+  }
+
+  /* Ambient background for the app shell: three very low-opacity colour fields
+     drifting on long, out-of-sync periods. Pointer-events are off and the whole
+     layer is dropped for users who ask for reduced motion, so it can never
+     interfere with reading or interaction. */
+  .app-aurora {
+    @apply pointer-events-none fixed inset-0 z-0 overflow-hidden;
+  }
+  .app-aurora span {
+    @apply absolute rounded-full blur-[110px];
+    will-change: transform;
+  }
+  .app-aurora .a {
+    animation: drift-a 34s ease-in-out infinite;
+    background: var(--aurora-a);
+    inset: -18% auto auto -12%;
+    width: 46vw;
+    height: 46vw;
+  }
+  .app-aurora .b {
+    animation: drift-b 44s ease-in-out infinite;
+    background: var(--aurora-b);
+    inset: auto -14% -20% auto;
+    width: 42vw;
+    height: 42vw;
+  }
+  .app-aurora .c {
+    animation: drift-c 52s ease-in-out infinite;
+    background: var(--aurora-c);
+    inset: 28% 24% auto auto;
+    width: 34vw;
+    height: 34vw;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-aurora {
+      display: none;
+    }
+  }
+
+  /* Full-bleed marketing section. Sections alternate between the three grounds
+     the reference uses and carry no borders — the colour change is the seam. */
+  .bleed-dark {
+    @apply bg-ink-950 text-paper-100;
+  }
+  .bleed-near {
+    @apply bg-ink-900 text-paper-100;
+  }
+  .bleed-light {
+    @apply bg-paper-100 text-ink-900;
+  }
+  .bleed-white {
+    @apply bg-white text-ink-900;
+  }
+
+  /* The eyebrow above a headline: 12px, regular, muted — never uppercase-tracked
+     the way a generated dashboard sets it. */
+  .eyebrow {
+    @apply text-[0.75rem] font-normal text-ink-500;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Recharts leaves a focus outline on the surface when clicked; it adds nothing
+   here because the charts are not keyboard-interactive. */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}

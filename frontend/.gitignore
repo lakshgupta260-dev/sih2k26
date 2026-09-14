@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+*.local
+
+# TypeScript incremental build cache
+*.tsbuildinfo
