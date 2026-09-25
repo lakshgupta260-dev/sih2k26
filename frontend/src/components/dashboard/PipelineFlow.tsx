@@ -58,7 +58,7 @@ export function PipelineFlow({ stages }: { stages: PipelineStage[] }) {
                     stage.state === "empty" && "border-dashed border-line bg-surface-raised/40 hover:border-line-strong",
                     stage.state === "active" && "border-line bg-surface-card hover:-translate-y-0.5 hover:shadow-lift",
                     stage.state === "attention" &&
-                      "border-amber-200 bg-amber-50/50 hover:-translate-y-0.5 hover:shadow-lift",
+                      "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/30 hover:-translate-y-0.5 hover:shadow-lift",
                   )}
                 >
                   <span
@@ -66,7 +66,7 @@ export function PipelineFlow({ stages }: { stages: PipelineStage[] }) {
                       "flex h-8 w-8 items-center justify-center rounded-[10px]",
                       stage.state === "empty" && "bg-surface-raised text-content-2",
                       stage.state === "active" && "bg-signal-600/25 text-accent",
-                      stage.state === "attention" && "bg-amber-100 text-amber-700",
+                      stage.state === "attention" && "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
                     )}
                   >
                     {stage.icon}

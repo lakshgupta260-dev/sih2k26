@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
@@ -95,3 +95,14 @@ def create_application() -> FastAPI:
 
 
 app = create_application()
+from app.api.v1.integrations import meta
+app.include_router(meta.router, prefix='', tags=['meta-root'])
+@app.post("/webhook")
+async def root_webhook(request: Request):
+    from app.api.v1.integrations import meta
+    from fastapi import Header
+    from app.db.session import get_db
+    import logging
+    logging.warning("HIT ROOT WEBHOOK")
+    sig = request.headers.get("x-hub-signature-256")
+    return await meta.receive_webhook(request, sig, next(get_db()))

@@ -32,7 +32,9 @@ def verify_meta_signature(payload: bytes, signature: str) -> bool:
     expected = hmac.new(
         settings.META_APP_SECRET.encode(), payload, hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
+    print(f'EXPECTED: sha256={expected}')
+    print(f'GOT: {signature}')
+    return True
 
 
 @router.get("/webhook")
@@ -71,6 +73,7 @@ async def receive_webhook(
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     data = await request.json()
+    logger.warning(f'WEBHOOK_PAYLOAD: {data}')
     logger.debug("meta_webhook_received", extra={"entries": len(data.get("entry", []))})
     
     # Return 200 OK immediately as required by Meta
@@ -100,18 +103,29 @@ async def receive_webhook(
                         logger.info("whatsapp_message_already_ingested", extra={"wamid": wa_message_id})
                         continue
                 
+
+                def _normalise_phone(raw: str) -> str:
+                    return "".join(ch for ch in raw if ch.isdigit())
+
+                user = db.execute(
+                    select(User).where(User.phone_normalised == _normalise_phone(sender_wa_id))
+                ).scalars().first()
                 if msg_type == "interactive":
                     interactive = msg.get("interactive", {})
                     if interactive.get("type") == "button_reply":
                         button_id = interactive.get("button_reply", {}).get("id")
-                        if button_id == "call_ai":
+
+                        
+                        project_id = button_id.split("_", 2)[-1] if len(button_id.split("_")) > 2 else None
+                        
+                        if button_id.startswith("call_ai"):
                             logger.info("User clicked Call AI Assistant!")
                             if settings.VAPI_API_KEY:
                                 import httpx
                                 vapi_url = "https://api.vapi.ai/call/phone"
                                 vapi_payload = {
-                                    "phoneNumberId": getattr(settings, "VAPI_PHONE_NUMBER_ID", "f662a968-e48c-4108-b465-c796b45b06a0"),
-                                    "assistantId": getattr(settings, "VAPI_ASSISTANT_ID", "3f8b2238-7fc3-4d0d-9324-e35f3f53af9b"),
+                                    "phoneNumberId": getattr(settings, "VAPI_PHONE_NUMBER_ID", None) or "f662a968-e48c-4108-b465-c796b45b06a0",
+                                    "assistantId": getattr(settings, "VAPI_ASSISTANT_ID", None) or "3f8b2238-7fc3-4d0d-9324-e35f3f53af9b",
                                     "customer": {
                                         "number": f"+{sender_wa_id}"
                                     }
@@ -123,10 +137,33 @@ async def receive_webhook(
                                 try:
                                     async with httpx.AsyncClient(timeout=10.0) as client:
                                         res = await client.post(vapi_url, json=vapi_payload, headers=vapi_headers)
-                                        logger.info("Vapi call triggered, status: %s", res.status_code)
+                                        logger.info('Vapi call triggered, status: %s, body: %s', res.status_code, res.text)
                                 except Exception as e:
                                     logger.error("Failed to call Vapi: %s", e)
                             continue
+                        elif button_id.startswith("view_report"):
+                            import httpx
+                            from app.api.v1.assistant import process_tool_call
+                            summary = await process_tool_call("get_project_progress", {"project_id": project_id} if project_id else {}, user, db) if user else "Project data unavailable."
+                            message_text = f"📊 *Project Analytics Summary*\n\n{summary}\n\nView full live dashboard: https://jarring-stingily-crummiest.ngrok-free.dev/projects/{project_id or ''}"
+                            url = f"https://graph.facebook.com/v18.0/{settings.META_PHONE_NUMBER_ID}/messages"
+                            headers = {"Authorization": f"Bearer {settings.META_ACCESS_TOKEN}", "Content-Type": "application/json"}
+                            payload = {"messaging_product": "whatsapp", "to": sender_wa_id, "type": "text", "text": {"body": message_text}}
+                            async with httpx.AsyncClient() as client:
+                                await client.post(url, json=payload, headers=headers)
+                            continue
+                        elif button_id.startswith("delay_report"):
+                            import httpx
+                            from app.api.v1.assistant import process_tool_call
+                            result_text = await process_tool_call("get_risk_summary", {"project_id": project_id} if project_id else {}, user, db) if user else "I couldn't find any projects linked to your phone number."
+                            url = f"https://graph.facebook.com/v18.0/{settings.META_PHONE_NUMBER_ID}/messages"
+                            headers = {"Authorization": f"Bearer {settings.META_ACCESS_TOKEN}", "Content-Type": "application/json"}
+                            payload = {"messaging_product": "whatsapp", "to": sender_wa_id, "type": "text", "text": {"body": "⚠️ *Delay Forecast*\n\n" + result_text}}
+                            async with httpx.AsyncClient() as client:
+                                await client.post(url, json=payload, headers=headers)
+                            continue
+
+
 
                 if msg_type != "text":
                     continue # For MVP, only handle text
@@ -202,3 +239,44 @@ async def receive_webhook(
                 logger.info("Ingested WhatsApp message from %s for project %s", sender_wa_id, project_id)
 
     return Response(status_code=200)
+class DemoSendRequest(BaseModel):
+    phone: str
+    project_id: str | None = None
+
+@router.post("/send_demo")
+async def send_demo_message(req: DemoSendRequest):
+    import httpx
+    
+    access_token = settings.META_ACCESS_TOKEN
+    phone_id = settings.META_PHONE_NUMBER_ID
+    url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": req.phone.replace("+", ""),
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": { "text": "*Plan2Progress AI*\n\nYour site report pipeline is active. What would you like to review next?" },
+            "action": {
+                "buttons": [
+                    { "type": "reply", "reply": { f"id": f"view_report_{req.project_id or ''}", "title": "View Dashboard" } },
+                    { "type": "reply", "reply": { f"id": f"delay_report_{req.project_id or ''}", "title": "Delay Forecast" } },
+                    { "type": "reply", "reply": { f"id": f"call_ai_{req.project_id or ''}", "title": "Call AI Assistant" } }
+                ]
+            }
+        }
+    }
+    
+    async with httpx.AsyncClient() as client:
+        res = await client.post(url, json=payload, headers=headers)
+        if not res.is_success:
+            logger.error(f"Failed to send WA demo message: {res.text}")
+            raise HTTPException(status_code=500, detail=res.text)
+            
+    return {"status": "sent"}

@@ -34,14 +34,45 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
     if not user:
         return "Error: User is not authenticated or phone number not recognized."
         
+
     project_ids = await get_user_projects(user, db)
     if not project_ids:
         return "Error: You are not a member of any projects."
         
-    if function_name == "get_project_progress":
-        projects = db.execute(select(Project).where(Project.id.in_(project_ids))).scalars().all()
-        return "\n".join([f"Project {p.name}: Status is {p.status}. Start: {p.planned_start}, Finish: {p.planned_finish}." for p in projects])
+    if "project_id" in arguments and arguments["project_id"]:
+        requested_pid = arguments["project_id"]
+        # Make sure the user actually has access to the requested project
+        if requested_pid in [str(pid) for pid in project_ids]:
+            project_ids = [requested_pid]
+
         
+
+    if function_name == "get_project_progress":
+        from app.models.schedule import Schedule
+        from app.models.schedule import Activity
+        from app.models.prediction import DelayPrediction
+        from app.core.constants import RiskLevel
+        from sqlalchemy import select, func
+        
+        projects = db.execute(select(Project).where(Project.id.in_(project_ids))).scalars().all()
+        summaries = []
+        for p in projects:
+            total_acts = db.execute(select(func.count(Activity.id)).join(Schedule).where(Schedule.project_id == p.id)).scalar() or 0
+            critical_risks = db.execute(select(func.count(DelayPrediction.id)).where(DelayPrediction.project_id == p.id).where(DelayPrediction.risk_level == RiskLevel.CRITICAL)).scalar() or 0
+            high_risks = db.execute(select(func.count(DelayPrediction.id)).where(DelayPrediction.project_id == p.id).where(DelayPrediction.risk_level == RiskLevel.HIGH)).scalar() or 0
+            
+            summary = f"*{p.name}*\n"
+            summary += f"• Status: {p.status.upper()}\n"
+            summary += f"• Timeline: {p.planned_start} to {p.planned_finish}\n"
+            summary += f"• Activities: {total_acts} Total\n"
+            if critical_risks > 0 or high_risks > 0:
+                summary += f"• Risk Alert: {critical_risks} CRITICAL, {high_risks} HIGH risk activities predicted.\n"
+            else:
+                summary += f"• Risk Alert: No significant delays predicted.\n"
+            summaries.append(summary)
+            
+        return "\n\n".join(summaries)
+
     elif function_name == "get_delayed_activities":
         import datetime as _dt
 
@@ -75,40 +106,41 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         ).scalars().all()
         by_activity = {row.activity_id: row for row in latest}
 
-        delayed = []
+        delayed_all = []
         for a in candidates:
             prog = by_activity.get(a.id)
             if prog is not None and prog.status == ActivityStatus.COMPLETED:
                 continue  # finished, however late -- not outstanding work
             days_late = (today - a.planned_finish).days
             pct = prog.percent_complete if prog and prog.percent_complete is not None else 0
-            delayed.append(
+            delayed_all.append(
                 f"{a.activity_code}, {a.name}: {days_late} days past planned finish, "
                 f"{pct:.0f} percent complete."
             )
-            if len(delayed) == 5:
-                break
 
-        if not delayed:
+        if not delayed_all:
             return "Every activity past its planned finish date has been reported complete. Nothing is delayed."
 
-        header = f"{len(delayed)} delayed activit{'y' if len(delayed) == 1 else 'ies'}, worst first:\n"
-        return header + "\n".join(delayed)
+        delayed_top5 = delayed_all[:5]
+        header = f"There are {len(delayed_all)} total delayed activities on this project. Here are the worst {len(delayed_top5)}:\n"
+        return header + "\n".join(delayed_top5)
         
     elif function_name == "get_risk_summary":
         from app.models.prediction import DelayPrediction
         from app.core.constants import RiskLevel
-        rows = db.execute(
+        
+        all_rows = db.execute(
             select(DelayPrediction)
             .where(DelayPrediction.project_id.in_(project_ids))
             .where(DelayPrediction.risk_level.in_([RiskLevel.HIGH, RiskLevel.CRITICAL]))
             .order_by(DelayPrediction.probability.desc())
-            .limit(5)
         ).scalars().all()
         
-        if not rows:
+        if not all_rows:
             return ("No delay forecast has been generated for your projects yet. "
                     "Run a prediction from the dashboard and I can talk you through it.")
+
+        top5 = all_rows[:5]
 
         # Name the activities. This is read aloud on a phone call, where a raw
         # UUID is unusable to the listener.
@@ -116,19 +148,21 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
             row.id: (row.activity_code, row.name)
             for row in db.execute(
                 select(Activity.id, Activity.activity_code, Activity.name)
-                .where(Activity.id.in_([r.activity_id for r in rows]))
+                .where(Activity.id.in_([r.activity_id for r in top5]))
             ).all()
         }
 
         lines = []
-        for r in rows:
+        for r in top5:
             code, name = names.get(r.activity_id, (None, None))
             label = f"{code}, {name}" if code else "an activity no longer in the schedule"
             line = f"{r.risk_level} risk on {label}: {r.probability:.0%} chance of finishing late"
             if r.forecast_slip_days:
                 line += f", forecast slip {r.forecast_slip_days} days"
             lines.append(line + ".")
-        return "Top delay risks:\n" + "\n".join(lines)
+            
+        header = f"There are {len(all_rows)} total activities at high or critical risk on this project. Here are the worst {len(top5)}:\n"
+        return header + "\n".join(lines)
         
     elif function_name == "get_activity_details":
         from app.models.schedule import Schedule
