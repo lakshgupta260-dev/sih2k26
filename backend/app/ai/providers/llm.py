@@ -121,6 +121,41 @@ class OpenAICompatibleLLMProvider:
             raise ExternalServiceError(f"LLM request failed: {exc}") from exc
 
 
+class GeminiLLMProvider:
+    """Google Gemini API (via OpenAI-compatible endpoint or native)."""
+
+    name = "gemini"
+
+    def __init__(self, api_key: str, model: str, timeout: int) -> None:
+        self.api_key = api_key
+        self.model = model or "gemini-2.5-flash"
+        self.timeout = timeout
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def complete(self, system: str, user: str, *, max_tokens: int = 2048) -> str:
+        try:
+            response = httpx.post(
+                f"{self.base_url}/chat/completions",
+                timeout=self.timeout,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"] or ""
+        except (httpx.HTTPError, KeyError, IndexError) as exc:
+            raise ExternalServiceError(f"LLM request failed: {exc}") from exc
+
+
 def get_llm_provider() -> LLMProvider:
     """Build the configured provider. Never raises; falls back to Null."""
     kind = (settings.LLM_PROVIDER or "none").strip().lower()
@@ -138,6 +173,10 @@ def get_llm_provider() -> LLMProvider:
         )
     if kind in ("openai", "openai_compatible"):
         return OpenAICompatibleLLMProvider(
+            settings.LLM_API_KEY, settings.LLM_MODEL, settings.LLM_TIMEOUT_SECONDS
+        )
+    if kind in ("gemini", "google"):
+        return GeminiLLMProvider(
             settings.LLM_API_KEY, settings.LLM_MODEL, settings.LLM_TIMEOUT_SECONDS
         )
     logger.warning("unknown_llm_provider", extra={"provider": kind})

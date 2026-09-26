@@ -215,6 +215,19 @@ class ReportService:
                 }
             )
 
+        ai_analysis = None
+        from app.ai.providers.llm import get_llm_provider
+        llm = get_llm_provider()
+        if llm.is_available():
+            project = self.db.get(Project, project_id)
+            system_prompt = "You are an expert construction project manager AI. Given the following stats about a project, provide a 2-sentence human-like executive summary analyzing the situation. Do not use markdown."
+            user_prompt = f"Project {project.name if project else 'Unknown'} is {project.status if project else 'UNKNOWN'}. It has {total} activities. Delay predictions: {high_risk} HIGH/CRITICAL risks. Overall progress is {progress_pct:.1f}%."
+            try:
+                ai_analysis = llm.complete(system_prompt, user_prompt).strip()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to generate AI analysis for PDF: {e}")
+
         return {
             "title": f"Project Progress & Delay Risk Report",
             "summary": {
@@ -224,6 +237,7 @@ class ReportService:
                 "delayed_activities": delayed,
                 "high_risk_count": high_risk,
                 "progress_pct": round(progress_pct, 1),
+                "ai_analysis": ai_analysis,
             },
             "activities": activity_data,
             "risks": risks,

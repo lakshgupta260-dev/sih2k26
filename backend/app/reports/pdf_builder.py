@@ -130,8 +130,14 @@ class PDFReportBuilder(BaseReportBuilder):
                 ]
             )
         )
+
         elements.append(summary_table)
         elements.append(Spacer(1, 14))
+
+        if summary.get("ai_analysis"):
+            elements.append(Paragraph("AI Analysis", heading_style))
+            elements.append(Paragraph(summary["ai_analysis"], body_style))
+            elements.append(Spacer(1, 14))
 
         # Key Activities Breakdown
         elements.append(Paragraph("Activity Status Breakdown", heading_style))

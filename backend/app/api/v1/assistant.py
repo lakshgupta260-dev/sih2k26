@@ -1,17 +1,23 @@
+import datetime as _dt
 import hashlib
 import uuid
 import logging
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+
+from app.models.schedule import Schedule, Activity
+from app.models.prediction import DelayPrediction
+from app.core.constants import RiskLevel, ActivityStatus
+from app.models.progress import ActualProgress
+from app.ai.providers.llm import get_llm_provider
+from sqlalchemy import select, func
+
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.user import User
 from app.models.project import ProjectMembership, Project
-from app.models.schedule import Activity
 from app.models.document import UploadedFile, ProcessingJob
-from app.core.constants import DocumentType
 from app.tasks.document_tasks import process_uploaded_file
 from app.core.config import settings
 import os
@@ -48,11 +54,9 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         
 
     if function_name == "get_project_progress":
-        from app.models.schedule import Schedule
-        from app.models.schedule import Activity
-        from app.models.prediction import DelayPrediction
-        from app.core.constants import RiskLevel
-        from sqlalchemy import select, func
+
+        
+        llm = get_llm_provider()
         
         projects = db.execute(select(Project).where(Project.id.in_(project_ids))).scalars().all()
         summaries = []
@@ -65,20 +69,26 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
             summary += f"• Status: {p.status.upper()}\n"
             summary += f"• Timeline: {p.planned_start} to {p.planned_finish}\n"
             summary += f"• Activities: {total_acts} Total\n"
+            
             if critical_risks > 0 or high_risks > 0:
                 summary += f"• Risk Alert: {critical_risks} CRITICAL, {high_risks} HIGH risk activities predicted.\n"
             else:
                 summary += f"• Risk Alert: No significant delays predicted.\n"
+            
+            if llm.is_available():
+                system_prompt = "You are an expert construction project manager AI. Given the following stats about a project, provide a 2-sentence human-like executive summary analyzing the situation. Do not use markdown."
+                user_prompt = f"Project {p.name} is {p.status} from {p.planned_start} to {p.planned_finish}. It has {total_acts} activities. Delay predictions: {critical_risks} CRITICAL risks, {high_risks} HIGH risks."
+                try:
+                    ai_reasoning = llm.complete(system_prompt, user_prompt)
+                    summary += f"\n\U0001f4a1 *AI Analysis:*\n_{ai_reasoning.strip()}_\n"
+                except Exception as e:
+                    logger.error(f"Failed to generate AI reasoning: {e}")
+                    
             summaries.append(summary)
             
         return "\n\n".join(summaries)
 
     elif function_name == "get_delayed_activities":
-        import datetime as _dt
-
-        from app.models.schedule import Schedule
-        from app.models.progress import ActualProgress
-        from app.core.constants import ActivityStatus
 
         today = _dt.date.today()
 
@@ -126,8 +136,6 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         return header + "\n".join(delayed_top5)
         
     elif function_name == "get_risk_summary":
-        from app.models.prediction import DelayPrediction
-        from app.core.constants import RiskLevel
         
         all_rows = db.execute(
             select(DelayPrediction)
@@ -165,8 +173,6 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         return header + "\n".join(lines)
         
     elif function_name == "get_activity_details":
-        from app.models.schedule import Schedule
-        from app.models.progress import ActualProgress
         activity_code = arguments.get("activity_code")
         if not activity_code:
             return "Error: activity_code is required."
@@ -191,7 +197,6 @@ async def process_tool_call(function_name: str, arguments: Dict[str, Any], user:
         
     elif function_name == "get_project_report":
         from app.services.reporting import ReportService
-        from app.core.constants import GeneratedReportFormat
         try:
             ReportService(db).generate_report(
                 project_id=project_ids[0],
