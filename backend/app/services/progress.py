@@ -535,7 +535,11 @@ class ProgressService:
                     wbs_path=activity.wbs_path,
                     level=activity.level,
                     completion_percentage=(earned / weight * 100.0) if weight > 0 else 0.0,
-                    status=progress.status if progress else ActivityStatus.NOT_STARTED,
+                    status=(
+                        ActivityStatus.COMPLETED if (earned / weight * 100.0) >= 100.0 else
+                        ActivityStatus.IN_PROGRESS if (earned / weight * 100.0) > 0.0 else
+                        ActivityStatus.NOT_STARTED
+                    ) if children.get(node_id) else (progress.status if progress else ActivityStatus.NOT_STARTED),
                     is_delayed=delayed[node_id],
                     is_leaf=not children.get(node_id),
                     weight=weight,

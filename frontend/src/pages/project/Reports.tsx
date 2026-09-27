@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   Sparkles,
   TrendingUp,
+  Trash2,
 } from "lucide-react";
 import { useProjectId } from "@/context/ProjectContext";
 import { generatedReportsApi } from "@/api/generatedReports";
@@ -89,6 +90,36 @@ export function Reports() {
     // Generation can be asynchronous — keep polling only while something is in flight.
     refetchInterval: (q) =>
       q.state.data?.items.some((r) => r.status === "PENDING" || r.status === "GENERATING") ? 2500 : false,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (reportId: string) => generatedReportsApi.delete(projectId, reportId),
+    onMutate: async (reportId: string) => {
+      await queryClient.cancelQueries({ queryKey: ["generated-reports", projectId] });
+      const previous = queryClient.getQueryData(["generated-reports", projectId]);
+      queryClient.setQueryData(["generated-reports", projectId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          items: old.items.filter((r: any) => r.id !== reportId),
+        };
+      });
+      return { previous };
+    },
+    onSuccess: () => {
+      toast("Report deleted", "success");
+    },
+    onError: (err, reportId, context: any) => {
+      queryClient.setQueryData(["generated-reports", projectId], context?.previous);
+      if (err instanceof ApiError) {
+        toast(err.message, "error");
+      } else {
+        toast("Failed to delete report", "error");
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["generated-reports", projectId] });
+    },
   });
 
   const requestMutation = useMutation({
@@ -377,6 +408,18 @@ export function Reports() {
                           Inspect data snapshot
                         </DropdownItem>
                         <DropdownSeparator />
+                        <DropdownItem
+                          icon={<Trash2 className="h-3.5 w-3.5 text-rose-500" />}
+                          className="!text-rose-500 hover:!bg-rose-500/10"
+                          onSelect={() => {
+                            if (window.confirm("Are you sure you want to delete this report?")) {
+                              deleteMutation.mutate(r.id);
+                            }
+                            close();
+                          }}
+                        >
+                          Delete report
+                        </DropdownItem>
                         <DropdownItem
                           icon={<Copy className="h-3.5 w-3.5" />}
                           disabled={!r.filename}

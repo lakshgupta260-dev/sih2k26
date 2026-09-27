@@ -23,4 +23,8 @@ export const generatedReportsApi = {
         responseType: "blob",
       })
       .then((r) => r),
+
+  delete: (projectId: string, reportId: string) =>
+    apiClient.delete(`/projects/${projectId}/generated-reports/${reportId}`).then((r) => r.data),
+
 };

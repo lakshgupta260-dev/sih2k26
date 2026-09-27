@@ -105,32 +105,24 @@ class ReportService:
         # activity reached this code (masked in the original tests, which
         # never seeded any activities). Rows are pulled ascending by
         # reporting_date so the last write per activity_id is the latest one.
-        latest_progress: dict[uuid.UUID, ActualProgress] = {}
-        if activity_ids:
-            progress_rows = self.db.scalars(
-                select(ActualProgress)
-                .where(ActualProgress.activity_id.in_(activity_ids))
-                .order_by(ActualProgress.reporting_date.asc())
-            ).all()
-            for row in progress_rows:
-                latest_progress[row.activity_id] = row
+        from app.services.progress import ProgressService
+        from app.models.project import Project
+        
+        project = self.db.get(Project, project_id)
+        schedule = self.db.scalar(
+            select(Schedule).where(Schedule.project_id == project_id).order_by(Schedule.created_at.desc())
+        )
+        
+        rollup_map = {}
+        if project and schedule:
+            try:
+                rollups = ProgressService(self.db).get_project_rollup(project, schedule.id)
+                rollup_map = {r.activity_id: r for r in rollups}
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to fetch rollup for report: {e}")
 
-        if status_filter:
-            activities = [
-                a
-                for a in activities
-                if (latest_progress.get(a.id).status if latest_progress.get(a.id) else ActivityStatus.NOT_STARTED)
-                == status_filter
-            ]
-
-        # Real delay-risk data lives in delay_predictions (Phase 7), keyed by
-        # activity_id. The prior implementation read risk_band/risk_score/
-        # forecast_delay_days straight off Activity via getattr(..., default),
-        # attributes that don't exist on the model -- every activity silently
-        # fell back to the default, so every report always showed "LOW" risk
-        # and an empty risk table no matter what the ML/rule-based predictor
-        # actually forecast. Joining the real prediction rows instead of
-        # fabricating them is required by this project's no-fake-AI rule.
+        # Real delay-risk data lives in delay_predictions
         predictions_by_activity: dict[uuid.UUID, DelayPrediction] = {}
         if activity_ids:
             rows = self.db.scalars(
@@ -141,23 +133,25 @@ class ReportService:
         today = date.today()
 
         def _status_of(activity: Activity) -> str:
-            progress = latest_progress.get(activity.id)
-            return progress.status if progress is not None else ActivityStatus.NOT_STARTED
+            r = rollup_map.get(activity.id)
+            if not r:
+                return ActivityStatus.NOT_STARTED
+            if not r.is_leaf:
+                if r.completion_percentage >= 100.0:
+                    return ActivityStatus.COMPLETED
+                if r.completion_percentage > 0.0:
+                    return ActivityStatus.IN_PROGRESS
+                return ActivityStatus.NOT_STARTED
+            return r.status
 
         def _percent_of(activity: Activity) -> float:
-            progress = latest_progress.get(activity.id)
-            if progress is None or progress.percent_complete is None:
-                return 0.0
-            return float(progress.percent_complete)
+            r = rollup_map.get(activity.id)
+            return float(r.completion_percentage) if r else 0.0
 
         def _is_delayed(activity: Activity) -> bool:
-            progress = latest_progress.get(activity.id)
-            if activity.planned_finish is None:
-                return False
-            if progress is not None and progress.actual_finish is not None:
-                return progress.actual_finish > activity.planned_finish
-            status = _status_of(activity)
-            return status != ActivityStatus.COMPLETED and activity.planned_finish < today
+            r = rollup_map.get(activity.id)
+            return r.is_delayed if r else False
+
 
         total = len(activities)
         completed = sum(1 for a in activities if _status_of(a) == ActivityStatus.COMPLETED)
@@ -327,3 +321,19 @@ class ReportService:
         filename = report.filename or f"report{Path(report.storage_path).suffix}"
         content_type = report.content_type or "application/octet-stream"
         return file_path, filename, content_type
+
+
+    def delete_report(
+        self, project_id: uuid.UUID, report_id: uuid.UUID, current_user: User
+    ) -> None:
+        project = self._ensure_access(project_id, current_user)
+        report = self.db.execute(
+            select(GeneratedReport).where(
+                GeneratedReport.id == report_id,
+                GeneratedReport.project_id == project.id,
+            )
+        ).scalar_one_or_none()
+        if not report:
+            raise NotFoundError("Report not found")
+        self.db.delete(report)
+        self.db.commit()

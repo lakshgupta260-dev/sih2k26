@@ -74,3 +74,13 @@ def download_generated_report(
         filename=filename,
         media_type=content_type,
     )
+
+
+@router.delete("/{report_id}")
+def delete_generated_report(
+    project_id: uuid.UUID,
+    report_id: uuid.UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> None:
+    ReportService(db).delete_report(project_id, report_id, current_user)
